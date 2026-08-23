@@ -23,9 +23,13 @@ the Chromium install/asset-build steps this project needs).
    `<app>.up.railway.app` URL. Railway terminates TLS for you, so connect
    over `wss://`, not `ws://`.
 4. Deploy. Watch the build logs — first build takes a few minutes
-   (installing Chromium). Once it's up, `https://<app>.up.railway.app/pressure`
-   should return 200 (that's the health check Railway itself polls) and
-   `https://<app>.up.railway.app/docs` should load the API docs.
+   (installing Chromium). Once it's up, `https://<app>.up.railway.app/`
+   should return 200 (that's the health check Railway itself polls — it's
+   unauthenticated by design, so it works before you've wired up a
+   token anywhere) and `https://<app>.up.railway.app/docs?token=<TOKEN>`
+   should load the API docs. `/pressure` is *not* a good manual health
+   check once `TOKEN` is set — it requires auth, so it'll 401 without
+   `?token=<TOKEN>` appended.
 
 ### Persisting job-board logins (optional)
 

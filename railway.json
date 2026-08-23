@@ -5,7 +5,7 @@
     "dockerfilePath": "docker/chromium/Dockerfile"
   },
   "deploy": {
-    "healthcheckPath": "/pressure",
+    "healthcheckPath": "/",
     "healthcheckTimeout": 100,
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 5
