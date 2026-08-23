@@ -106,6 +106,58 @@ function parseJobUrl(rawUrl: string): { board: 'greenhouse' | 'lever'; company: 
   return null;
 }
 
+interface TargetJob {
+  board: 'greenhouse' | 'lever';
+  id: string;
+  title: string;
+  company: string;
+  url: string;
+  applyUrl: string;
+}
+
+/**
+ * Shared by every tool that targets a specific application (apply_to_job,
+ * get_application_questions): either a direct url (parsed via
+ * parseJobUrl), or board+id looked up in the tracked-jobs store. Throws a
+ * caller-facing error covering every rejection case (unrecognized url,
+ * neither given, board+id not tracked).
+ */
+async function resolveTargetJob(
+  { url, board, id }: { url?: string; board?: 'greenhouse' | 'lever'; id?: string },
+  store: AnyModule,
+): Promise<TargetJob> {
+  if (url) {
+    const parsed = parseJobUrl(url);
+    if (!parsed) {
+      throw new Error(
+        `"${url}" isn't a recognized Greenhouse or Lever job URL. Auto-apply only supports ` +
+          'links under boards.greenhouse.io, job-boards.greenhouse.io, or jobs.lever.co — ' +
+          "other boards' Terms of Service restrict automated applications.",
+      );
+    }
+    return { board: parsed.board, id: parsed.id, title: '', company: parsed.company, url, applyUrl: url };
+  }
+
+  if (!board || !id) {
+    throw new Error(
+      'Provide either "url" (a direct Greenhouse/Lever job link) or both "board" and "id" ' +
+        '(from search_jobs/list_tracked_jobs).',
+    );
+  }
+  const tracked = (await store.list()).find((r: AnyModule) => r.board === board && r.id === id);
+  if (!tracked) {
+    throw new Error(`No tracked job for ${board}:${id}. Run search_jobs first, or pass "url" directly.`);
+  }
+  return {
+    board,
+    id: tracked.id,
+    title: tracked.title,
+    company: tracked.company,
+    url: tracked.url,
+    applyUrl: tracked.url,
+  };
+}
+
 const boardEnum = z.enum(['greenhouse', 'lever', 'indeed', 'linkedin']);
 const applyBoardEnum = z.enum(['greenhouse', 'lever']);
 const statusEnum = z.enum(['seen', 'filled', 'needs-answers', 'applied']);
@@ -359,6 +411,63 @@ export function registerJobSourcingTools(server: McpServer, config: Config, logg
   );
 
   server.registerTool(
+    'get_application_questions',
+    {
+      description:
+        'Surveys a job\'s application form WITHOUT filling or submitting anything — no ' +
+        'screenshot, no status change, cheaper than apply_to_job — and reports every field: ' +
+        'its type, whether it\'s required, its options if it\'s a dropdown, and whether the ' +
+        'candidate profile (or an "answers" you pass here to preview against) would already ' +
+        'cover it. Use this to poll several jobs\' custom questions up front and decide which ' +
+        'ones are worth saving permanently via set_candidate_profile\'s "defaultAnswers" — ' +
+        'before ever running apply_to_job/poll_and_apply for real. Same targeting as ' +
+        'apply_to_job: "url" (a direct Greenhouse/Lever job link) or "board"+"id" (from ' +
+        'search_jobs/list_tracked_jobs).',
+      inputSchema: {
+        url: z
+          .string()
+          .optional()
+          .describe(
+            'Direct link to a Greenhouse or Lever job posting. Takes precedence over board/id when given.',
+          ),
+        board: applyBoardEnum.optional(),
+        id: z.string().optional().describe('The job id from search_jobs/list_tracked_jobs.'),
+        answers: z
+          .record(z.string())
+          .optional()
+          .describe('Preview against these answers in addition to the saved profile, without saving them anywhere.'),
+      },
+    },
+    async ({ url, board, id, answers }) => {
+      const { ApplicationStore } = await importJobSourcing('store.js');
+      const store = new ApplicationStore(jobSourcingData('applications.json'));
+      const job = await resolveTargetJob({ url, board, id }, store);
+
+      const client = await makeClient(config);
+      const { loadCandidateProfile } = await importJobSourcing('profile.js');
+      const profile = await loadCandidateProfile(jobSourcingConfig('candidate.json'));
+      const { inspectApplication } = await importJobSourcing('apply/autofill.js');
+
+      const fields = await inspectApplication(client, job, profile, { answers });
+      const open = fields.filter((f: AnyModule) => !f.covered);
+      const lines = open.map((f: AnyModule) => {
+        const options = f.options?.length ? ` [options: ${f.options.join(' | ')}]` : '';
+        const req = f.required ? ' REQUIRED' : '';
+        return `- "${f.name}" (${f.tag}${f.type && f.type !== 'text' ? `/${f.type}` : ''}${req})${options}`;
+      });
+
+      logger.info(`MCP get_application_questions: ${job.board}:${job.id} — ${open.length} open of ${fields.length}`);
+      return textResult(
+        `${job.board}:${job.id} — ${fields.length} field(s), ${open.length} not yet covered by ` +
+          `the profile${answers ? '/answers' : ''}.\n\n` +
+          (lines.length
+            ? `Open questions — pass any worth saving to set_candidate_profile's "defaultAnswers":\n${lines.join('\n')}`
+            : 'Everything is covered — apply_to_job should be able to fill this one fully.'),
+      );
+    },
+  );
+
+  server.registerTool(
     'apply_to_job',
     {
       description:
@@ -408,38 +517,7 @@ export function registerJobSourcingTools(server: McpServer, config: Config, logg
     async ({ url, board, id, answers, submit }) => {
       const { ApplicationStore } = await importJobSourcing('store.js');
       const store = new ApplicationStore(jobSourcingData('applications.json'));
-
-      let job: { board: 'greenhouse' | 'lever'; id: string; title: string; company: string; url: string; applyUrl: string };
-      if (url) {
-        const parsed = parseJobUrl(url);
-        if (!parsed) {
-          throw new Error(
-            `"${url}" isn't a recognized Greenhouse or Lever job URL. Auto-apply only supports ` +
-              'links under boards.greenhouse.io, job-boards.greenhouse.io, or jobs.lever.co — ' +
-              'other boards\' Terms of Service restrict automated applications.',
-          );
-        }
-        job = { board: parsed.board, id: parsed.id, title: '', company: parsed.company, url, applyUrl: url };
-      } else {
-        if (!board || !id) {
-          throw new Error(
-            'Provide either "url" (a direct Greenhouse/Lever job link) or both "board" and ' +
-              '"id" (from search_jobs/list_tracked_jobs).',
-          );
-        }
-        const tracked = (await store.list()).find((r: AnyModule) => r.board === board && r.id === id);
-        if (!tracked) {
-          throw new Error(`No tracked job for ${board}:${id}. Run search_jobs first, or pass "url" directly.`);
-        }
-        job = {
-          board,
-          id: tracked.id,
-          title: tracked.title,
-          company: tracked.company,
-          url: tracked.url,
-          applyUrl: tracked.url,
-        };
-      }
+      const job = await resolveTargetJob({ url, board, id }, store);
 
       const client = await makeClient(config);
       const { loadCandidateProfile } = await importJobSourcing('profile.js');

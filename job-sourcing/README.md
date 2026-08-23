@@ -99,9 +99,12 @@ src/
     indeed.js              Browser-driven search (opt-in, read-only).
     linkedin.js            Browser-driven search (opt-in, read-only).
   apply/
-    autofill.js           Generic label-driven form filler + screenshot.
-                         Blocks submission on any unanswered field the
-                         page marks required.
+    autofill.js           autofillApplication: generic label-driven form
+                         filler + screenshot, blocks submission on any
+                         unanswered required field. inspectApplication:
+                         read-only survey of a form's fields (no fill, no
+                         screenshot) — what the MCP get_application_questions
+                         tool uses to poll a job's questions cheaply.
     greenhouse-apply.js    Greenhouse entry point.
     lever-apply.js          Lever entry point.
   cli.js                 search | apply | poll-apply | list

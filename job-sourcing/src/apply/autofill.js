@@ -164,6 +164,38 @@ async function selectOption(page, index, want) {
 }
 
 /**
+ * Surveys `job.applyUrl`'s form without filling or submitting anything —
+ * just navigates, reads every field (same detail as autofillApplication's
+ * `skipped` report: type, required, and select options), and marks
+ * whether the candidate profile/`answers` would currently resolve it.
+ * No screenshot, no typing, no status side effects.
+ *
+ * Use this to survey a job's custom questions cheaply — across many jobs,
+ * before committing to a real autofillApplication run — and answer them
+ * via the MCP set_candidate_profile tool's `defaultAnswers` (to persist
+ * across applications) rather than discovering them one at a time through
+ * a full dry-run apply.
+ */
+export async function inspectApplication(client, job, profile, { answers = {} } = {}) {
+  return client.withPage({}, async (page) => {
+    await page.goto(job.applyUrl ?? job.url, { waitUntil: 'domcontentloaded' });
+    await dismissCommonBanners(page);
+
+    const fields = await describeFields(page);
+    return fields.map((field) => {
+      if (field.type === 'file') {
+        const covered =
+          (/resume|cv/i.test(field.name) && Boolean(profile.resumePath)) ||
+          (/cover/i.test(field.name) && Boolean(profile.coverLetterPath));
+        return { ...field, covered };
+      }
+      const value = resolveFieldValue(field.name, profile, job, answers);
+      return { ...field, covered: value !== undefined };
+    });
+  });
+}
+
+/**
  * Fills `job.applyUrl` using `profile`, optionally overridden per-field by
  * `answers` (see resolveFieldValue). Returns a report of what was filled,
  * what was skipped (with enough detail — type, and options for selects —

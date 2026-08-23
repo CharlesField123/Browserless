@@ -54,8 +54,34 @@ screenshot/PDF/scrape APIs as MCP tools, just the job-sourcing ones below.
 | `upload_resume` | No | Uploads a resume/cover letter file, points the profile at it |
 | `search_jobs` | Only for indeed/linkedin | Searches a board, records new results as "seen" |
 | `list_tracked_jobs` | No | Lists jobs found so far, optionally by status |
+| `get_application_questions` | Yes | Surveys a job's form — every field, no filling/screenshot/status change |
 | `apply_to_job` | Yes | Autofills a Greenhouse/Lever application, returns a screenshot |
 | `poll_and_apply` | Yes | Searches + autofills + (optionally) submits a batch, one call, no per-job review |
+
+### Polling questions, then writing answers to the server
+
+The loop for building up good `defaultAnswers` coverage before trusting
+`poll_and_apply` at batch scale: **poll**, then **write**.
+
+1. `get_application_questions({url})` (or `board`+`id`) — navigates the
+   application page and reports every field: type, required, dropdown
+   options, and whether the saved profile already covers it. No filling,
+   no screenshot, no store status change — cheap enough to run across many
+   postings just to see what they ask, before deciding anything is worth
+   answering permanently.
+2. For an answer worth keeping across every application on a board (not
+   just this one job), write it to the server: `set_candidate_profile({
+   defaultAnswers: {"Are you authorized to work in this country?": "Yes"}})`.
+   That merges in — it doesn't erase whatever else was already saved.
+3. Re-run `get_application_questions` on the same or another job to
+   confirm those answers now show as covered, then move on to
+   `apply_to_job`/`poll_and_apply` with confidence there won't be
+   surprises in the skipped list.
+
+`get_application_questions` also takes its own `answers` parameter, to
+preview "if I gave these answers, would everything be covered?" without
+saving anything — useful for checking a one-off answer before deciding
+it's actually worth promoting to `defaultAnswers`.
 
 ### Building the candidate profile entirely through the connector
 
