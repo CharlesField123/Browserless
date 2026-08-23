@@ -1,0 +1,49 @@
+# Per-Dockerfile ignore file for docker/railway/Dockerfile. Docker uses
+# this INSTEAD OF the root .dockerignore when a file named
+# "<dockerfile>.dockerignore" exists next to it — it does not merge with
+# the root one, so everything needed from there is repeated here too.
+#
+# The critical line is the routes exclusion below: without it, `npm run
+# build` compiles src/routes/{chrome,firefox,webkit,edge} into build/ even
+# though this image only installs the Chromium browser binary, and
+# Browserless's startup validation (Browserless.start(), src/browserless.ts)
+# throws on any compiled route whose declared browser class has no
+# matching installed binary — crashing the whole server before it can
+# bind to a port. docker/chromium/Dockerfile.dockerignore does the same
+# exclusion for the same reason; this mirrors it.
+
+# Ignore non-chromium routes
+src/routes/chrome
+src/routes/firefox
+src/routes/webkit
+src/routes/edge
+
+# Dependencies & compiled output -- regenerated inside the image
+node_modules/
+build/
+
+# Version control & CI -- never copied into any image
+.git/
+.gitignore
+.github
+
+# Editor / OS cruft
+.editorconfig
+.vscode/
+.idea
+.DS_Store
+.no-git/
+
+# Local environment & logs -- must never end up in an image
+*.env*
+*.log
+npm-debug.log*
+
+# job-sourcing/ is copied whole into the runtime stage, but never its
+# local node_modules, personal data, or candidate profile/board config
+# (those belong on a mounted volume, see RAILWAY.md and MCP.md, not
+# baked into an image layer).
+job-sourcing/node_modules
+job-sourcing/data
+job-sourcing/config/candidate.json
+job-sourcing/config/boards.json
