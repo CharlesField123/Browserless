@@ -80,6 +80,31 @@ the entire point of the dry-run step. See JOB_SOURCING.md's
 [Ethics & Terms of Service](./JOB_SOURCING.md#ethics--terms-of-service)
 section for why auto-apply is Greenhouse/Lever-only in the first place.
 
+### The candidate profile can't answer everything — that's what `answers` is for
+
+`config/candidate.json` reliably covers the fields every application shares
+(name, email, resume upload, standard links). It can't anticipate a given
+company's custom screening questions — "why do you want to work here?",
+role-specific technical questions, a salary figure tailored to *this* role.
+Rather than guess, `apply_to_job` reports those as `skipped`, each with its
+field type and (for dropdowns) its options, so you — or Claude, reading the
+job description and company context — can compose a real answer:
+
+1. Call `apply_to_job` once with just `url` (or `board`+`id`). Read the
+   `skipped` list in the response.
+2. Call it again, same target, with `answers` — an object keyed by the
+   *exact* field label from step 1's skipped list, e.g.
+   `{"Why do you want to work here?": "..."}`. Still leave `submit` off;
+   review the new screenshot to confirm those answers actually landed
+   correctly (a dropdown especially — it's matched by option text, and
+   worth confirming the right one got selected).
+3. Only then call it a third time with `submit: true`.
+
+`answers` always wins over anything the static profile would have matched
+for the same field, so it's also how to override a profile default for one
+specific application (a different desired-start-date for a role with an
+unusual notice period, say) without editing `candidate.json`.
+
 ## Persisting your config
 
 Two things need to survive a Railway redeploy:

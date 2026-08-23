@@ -25,7 +25,16 @@ node src/cli.js search              # search every board in config/boards.json
 node src/cli.js list                # list all tracked jobs
 node src/cli.js list applied        # filter by status: seen | filled | applied
 node src/cli.js apply <board>:<id>  # autofill (dry-run by default)
+node src/cli.js apply <board>:<id> --answers=answers.json  # + custom per-application answers
 ```
+
+The candidate profile can't anticipate a given company's custom screening
+questions. Run `apply` once without `--answers`, check the printed "Skipped
+fields" list (each with its type and, for dropdowns, its options), write
+those into a `{"field label": "answer"}` JSON file, and re-run pointing
+`--answers` at it — those answers take priority over the profile for any
+field they match. Still dry-run by default either way; re-run with
+`DRY_RUN=false` only once you've reviewed the screenshot.
 
 npm shortcuts: `npm run search`, `npm run list`, `npm run apply -- <board>:<id>`.
 

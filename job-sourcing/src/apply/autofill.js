@@ -10,8 +10,14 @@ import { logger } from '../logger.js';
  * selectors this walks every input/textarea/select on the page, works out
  * a human-readable "field name" for it (its <label>, aria-label,
  * placeholder, or name attribute), and fills it if that name matches a
- * known pattern for the candidate profile. Anything it can't confidently
- * match is left alone and reported, so you can review before submitting.
+ * known pattern for the candidate profile — or, more usefully for the
+ * many custom per-company questions a static profile can't anticipate
+ * ("why do you want to work here?", role-specific screening questions,
+ * salary expectations for *this* role), an `answers` map supplied for
+ * this specific application. Anything still unmatched is left alone and
+ * reported (with its type and, for <select>, its options) so a caller —
+ * a human, or an LLM reading the skipped list and composing answers from
+ * the job description — can supply `answers` and re-run before submitting.
  *
  * This is deliberately conservative: it NEVER clicks submit unless
  * `dryRun: false` is passed explicitly, and it always screenshots the
@@ -51,6 +57,33 @@ function matchProfileValue(fieldName, profile, job) {
   return defaultAnswer?.[1];
 }
 
+/**
+ * Looks up a per-application override for `fieldName` in `answers`
+ * (a plain {question: answer} map — see autofillApplication's `answers`
+ * option). Tries an exact case-insensitive match first — the reliable
+ * path when a caller copies a field name verbatim from a previous
+ * autofillApplication result's `skipped` list — then falls back to a
+ * substring match either direction for minor label drift.
+ */
+export function findAnswer(fieldName, answers = {}) {
+  const target = fieldName.trim().toLowerCase();
+  for (const [question, value] of Object.entries(answers)) {
+    if (question.trim().toLowerCase() === target) return value;
+  }
+  for (const [question, value] of Object.entries(answers)) {
+    const q = question.trim().toLowerCase();
+    if (q && (target.includes(q) || q.includes(target))) return value;
+  }
+  return undefined;
+}
+
+/** Per-application `answers` take priority over the static candidate profile. */
+export function resolveFieldValue(fieldName, profile, job, answers) {
+  const manual = findAnswer(fieldName, answers);
+  if (manual !== undefined) return manual;
+  return matchProfileValue(fieldName, profile, job);
+}
+
 async function describeFields(page) {
   return page.evaluate(() => {
     function labelFor(el) {
@@ -62,12 +95,21 @@ async function describeFields(page) {
       return el.getAttribute('name') || el.id || '';
     }
     const els = Array.from(document.querySelectorAll('input, textarea, select'));
-    return els.map((el, index) => ({
-      index,
-      tag: el.tagName.toLowerCase(),
-      type: el.getAttribute('type') || 'text',
-      name: labelFor(el),
-    }));
+    return els.map((el, index) => {
+      const tag = el.tagName.toLowerCase();
+      const field = {
+        index,
+        tag,
+        type: el.getAttribute('type') || 'text',
+        name: labelFor(el),
+      };
+      if (tag === 'select') {
+        field.options = Array.from(el.options)
+          .map((o) => o.textContent.trim())
+          .filter(Boolean);
+      }
+      return field;
+    });
   });
 }
 
@@ -92,15 +134,40 @@ async function dismissCommonBanners(page) {
     .catch(() => {});
 }
 
+/** Selects a <select> option by matching `want` against option text (preferred), then value. */
+async function selectOption(page, index, want) {
+  return page.evaluate(
+    (i, wantValue) => {
+      const el = document.querySelectorAll('input, textarea, select')[i];
+      const options = Array.from(el.options);
+      const wanted = String(wantValue).trim().toLowerCase();
+      const match =
+        options.find((o) => o.textContent.trim().toLowerCase() === wanted) ||
+        options.find((o) => o.value.toLowerCase() === wanted) ||
+        options.find((o) => o.textContent.trim().toLowerCase().includes(wanted));
+      if (!match) return false;
+      el.value = match.value;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    },
+    index,
+    want,
+  );
+}
+
 /**
- * Fills `job.applyUrl` using `profile`. Returns a report of what was
- * filled, what was skipped, and where the review screenshot was saved.
+ * Fills `job.applyUrl` using `profile`, optionally overridden per-field by
+ * `answers` (see resolveFieldValue). Returns a report of what was filled,
+ * what was skipped (with enough detail — type, and options for selects —
+ * to compose an `answers` entry for it), and where the review screenshot
+ * was saved.
  */
 export async function autofillApplication(
   client,
   job,
   profile,
-  { dryRun = true, screenshotDir = './data/screenshots' } = {},
+  { dryRun = true, screenshotDir = './data/screenshots', answers = {} } = {},
 ) {
   return client.withPage({}, async (page) => {
     await page.goto(job.applyUrl ?? job.url, { waitUntil: 'domcontentloaded' });
@@ -128,16 +195,20 @@ export async function autofillApplication(
         continue;
       }
 
-      const value = matchProfileValue(field.name, profile, job);
+      const value = resolveFieldValue(field.name, profile, job, answers);
       if (value === undefined) {
         skipped.push(field);
         continue;
       }
 
-      const handle = (await page.$$('input, textarea, select'))[field.index];
       if (field.tag === 'select') {
-        await handle.select(String(value)).catch(() => skipped.push(field));
+        const ok = await selectOption(page, field.index, value);
+        if (!ok) {
+          skipped.push(field);
+          continue;
+        }
       } else {
+        const handle = (await page.$$('input, textarea, select'))[field.index];
         await handle.click({ clickCount: 3 }).catch(() => {});
         await handle.type(String(value), { delay: 15 });
       }

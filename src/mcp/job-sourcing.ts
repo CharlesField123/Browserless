@@ -231,7 +231,15 @@ export function registerJobSourcingTools(server: McpServer, config: Config, logg
         "Only Greenhouse and Lever are supported (other boards' ToS restrict automated " +
         "submission — you'd apply manually via the listing URL for those). By default this " +
         'only fills the form and returns a screenshot for review — it does NOT submit. Pass ' +
-        'submit=true only after the human has reviewed that screenshot and told you to go ahead.',
+        'submit=true only after the human has reviewed that screenshot and told you to go ahead.\n\n' +
+        'The candidate profile alone can\'t answer every application\'s custom questions ' +
+        '("why do you want to work here?", role-specific screening questions, salary for ' +
+        'this role). Call this once first to see which fields it filled from the profile ' +
+        'and which it skipped (each skipped field\'s type, and for dropdowns its options, ' +
+        'is reported so you can compose a sensible answer using the job description/company ' +
+        'context) — then call it again with "answers" (question text -> answer, matched ' +
+        'against the same field labels reported as skipped) to fill those in too, still as a ' +
+        'dry run, before ever passing submit=true.',
       inputSchema: {
         url: z
           .string()
@@ -243,6 +251,15 @@ export function registerJobSourcingTools(server: McpServer, config: Config, logg
           ),
         board: applyBoardEnum.optional(),
         id: z.string().optional().describe('The job id from search_jobs/list_tracked_jobs.'),
+        answers: z
+          .record(z.string())
+          .optional()
+          .describe(
+            'Per-application answers for fields the candidate profile can\'t cover, keyed ' +
+              'by the field label as reported in a previous call\'s "skipped" list (e.g. ' +
+              '{"Why do you want to work here?": "..."}). Takes priority over the profile ' +
+              'for any field it matches.',
+          ),
         submit: z
           .boolean()
           .optional()
@@ -250,7 +267,7 @@ export function registerJobSourcingTools(server: McpServer, config: Config, logg
           .describe('Actually submit the application. Defaults to false (fill + screenshot only).'),
       },
     },
-    async ({ url, board, id, submit }) => {
+    async ({ url, board, id, answers, submit }) => {
       const { ApplicationStore } = await importJobSourcing('store.js');
       const store = new ApplicationStore(jobSourcingData('applications.json'));
 
@@ -297,21 +314,29 @@ export function registerJobSourcingTools(server: McpServer, config: Config, logg
       const result = await apply(client, job, profile, {
         dryRun: !submit,
         screenshotDir: jobSourcingData('screenshots'),
+        answers,
       });
 
       await store.record(job, { status: result.submitted ? 'applied' : 'filled' });
 
       const screenshot = await readFile(result.screenshotPath);
+      const skippedDetail = result.skipped.map((f: AnyModule) => {
+        const options = f.options?.length ? ` [options: ${f.options.join(' | ')}]` : '';
+        return `- "${f.name}" (${f.tag}${f.type && f.type !== 'text' ? `/${f.type}` : ''})${options}`;
+      });
       const summary = [
         `Filled ${result.filled.length} field(s), skipped ${result.skipped.length}.`,
-        result.skipped.length
-          ? `Skipped (review manually): ${result.skipped.map((f: AnyModule) => f.name).join(', ')}`
+        skippedDetail.length
+          ? `Skipped fields — pass an "answers" entry keyed by the exact label below to fill ` +
+            `these on the next call:\n${skippedDetail.join('\n')}`
           : '',
         result.submitted
           ? 'Application submitted.'
           : submit
             ? 'Form filled but no submit button was found — submit manually.'
-            : 'Not submitted (dry run). Review the screenshot, then call apply_to_job again with submit=true to send it.',
+            : 'Not submitted (dry run). Review the screenshot and skipped fields above, then ' +
+              'call apply_to_job again (with "answers" for anything worth filling, and ' +
+              'submit=true) to send it.',
       ]
         .filter(Boolean)
         .join('\n');

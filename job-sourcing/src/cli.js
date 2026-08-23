@@ -70,11 +70,24 @@ async function cmdSearch() {
 }
 
 async function cmdApply() {
-  const [key] = rest;
+  const [key, ...flags] = rest;
   if (!key) {
-    console.error('Usage: job-sourcing apply <board>:<id>');
+    console.error('Usage: job-sourcing apply <board>:<id> [--answers=path/to/answers.json]');
     process.exitCode = 1;
     return;
+  }
+
+  const answersFlag = flags.find((f) => f.startsWith('--answers='));
+  let answers = {};
+  if (answersFlag) {
+    const answersPath = answersFlag.slice('--answers='.length);
+    try {
+      answers = JSON.parse(await readFile(answersPath, 'utf8'));
+    } catch (err) {
+      console.error(`Couldn't read --answers file at ${answersPath}: ${err.message}`);
+      process.exitCode = 1;
+      return;
+    }
   }
   const [board, id] = key.split(':');
   const store = new ApplicationStore();
@@ -101,14 +114,18 @@ async function cmdApply() {
                                           : (await import('./apply/lever-apply.js')).applyOnLever;
 
   const job = { board: record.board, id: record.id, title: record.title, company: record.company, url: record.url, applyUrl: record.url };
-  const result = await applier(client, job, profile, { dryRun });
+  const result = await applier(client, job, profile, { dryRun, answers });
 
   await store.record(job, { status: result.submitted ? 'applied' : 'filled' });
 
   console.log(`Screenshot saved to ${result.screenshotPath}`);
   console.log(`Filled ${result.filled.length} field(s); skipped ${result.skipped.length} field(s).`);
   if (result.skipped.length) {
-    console.log('Skipped fields (review manually):', result.skipped.map((f) => f.name).join(', '));
+    console.log('Skipped fields — add these to an --answers JSON file to fill them:');
+    for (const f of result.skipped) {
+      const options = f.options?.length ? ` [options: ${f.options.join(' | ')}]` : '';
+      console.log(`  - "${f.name}" (${f.tag}${f.type && f.type !== 'text' ? `/${f.type}` : ''})${options}`);
+    }
   }
   console.log(
     result.dryRun
@@ -140,8 +157,12 @@ if (!commands[command]) {
   search              Search all boards configured in config/boards.json
                       and record new results.
   apply <board>:<id>  Autofill (and, unless DRY_RUN=true, submit) an
-                      application for a tracked job. Only Greenhouse and
-                      Lever support auto-apply.
+    [--answers=file]  application for a tracked job. Only Greenhouse and
+                      Lever support auto-apply. --answers points to a JSON
+                      file of {"field label": "answer"} for questions the
+                      candidate profile can't cover (run once without it
+                      to see which fields were skipped, then fill those
+                      in and re-run).
   list [status]       List tracked jobs, optionally filtered by status
                       (seen | filled | applied).`);
   process.exitCode = command ? 1 : 0;
