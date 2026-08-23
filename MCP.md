@@ -54,6 +54,15 @@ below.
 | `list_tracked_jobs` | No | Lists jobs found so far, optionally by status |
 | `apply_to_job` | Yes | Autofills a Greenhouse/Lever application, returns a screenshot |
 
+`apply_to_job` doesn't require going through `search_jobs` first — pass it
+a `url` directly (a `boards.greenhouse.io`, `job-boards.greenhouse.io`, or
+`jobs.lever.co` link) and it'll apply to that listing on the spot. That's
+the same allowlist `search_jobs`'s auto-apply support is restricted to, for
+the ToS reasons above — a LinkedIn or Indeed URL passed as `url` is
+rejected with an explanatory error, not silently attempted. Prefer
+`board`+`id` (from a prior `search_jobs`/`list_tracked_jobs` call) when
+you have it; `url` is for a listing found outside this toolkit.
+
 `search_jobs` and `apply_to_job` that need a browser connect to *this same
 Browserless instance* over a loopback WebSocket (`ws://127.0.0.1:<port>`) —
 see `src/mcp/job-sourcing.ts`. No external Browserless dependency, no second

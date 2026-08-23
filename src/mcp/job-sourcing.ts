@@ -76,6 +76,36 @@ function textResult(text: string) {
   return { content: [{ type: 'text' as const, text }] };
 }
 
+/**
+ * Recognizes a direct Greenhouse/Lever job-posting URL so apply_to_job can
+ * target a listing the caller found on their own, without a prior
+ * search_jobs call. Deliberately narrow: only these two hosts, since
+ * auto-apply is restricted to boards whose ToS allow it (see JOB_SOURCING.md).
+ */
+function parseJobUrl(rawUrl: string): { board: 'greenhouse' | 'lever'; company: string; id: string } | null {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return null;
+  }
+  const host = url.hostname.toLowerCase();
+
+  if (host === 'boards.greenhouse.io' || host === 'job-boards.greenhouse.io') {
+    const match = url.pathname.match(/^\/([^/]+)\/jobs\/([^/?#]+)/);
+    if (!match) return null;
+    return { board: 'greenhouse', company: match[1], id: match[2] };
+  }
+
+  if (host === 'jobs.lever.co') {
+    const match = url.pathname.match(/^\/([^/]+)\/([^/?#]+)/);
+    if (!match) return null;
+    return { board: 'lever', company: match[1], id: match[2] };
+  }
+
+  return null;
+}
+
 const boardEnum = z.enum(['greenhouse', 'lever', 'indeed', 'linkedin']);
 const applyBoardEnum = z.enum(['greenhouse', 'lever']);
 const statusEnum = z.enum(['seen', 'filled', 'applied']);
@@ -194,15 +224,25 @@ export function registerJobSourcingTools(server: McpServer, config: Config, logg
     'apply_to_job',
     {
       description:
-        'Autofills a job application for a job previously found by search_jobs, using the ' +
-        'candidate profile. Only Greenhouse and Lever are supported (other boards\' ToS ' +
-        "restrict automated submission — search_jobs still works for them, but you'd apply " +
-        'manually via the listing URL). By default this only fills the form and returns a ' +
-        'screenshot for review — it does NOT submit. Pass submit=true only after the human ' +
-        'has reviewed that screenshot and told you to go ahead.',
+        'Autofills a job application, using the candidate profile. Target it either way: ' +
+        'pass "url" — a direct link to a Greenhouse or Lever job posting you already have ' +
+        '(e.g. from a listing the human found themselves, not through search_jobs) — or ' +
+        'pass "board"+"id" for a job previously found by search_jobs/list_tracked_jobs. ' +
+        "Only Greenhouse and Lever are supported (other boards' ToS restrict automated " +
+        "submission — you'd apply manually via the listing URL for those). By default this " +
+        'only fills the form and returns a screenshot for review — it does NOT submit. Pass ' +
+        'submit=true only after the human has reviewed that screenshot and told you to go ahead.',
       inputSchema: {
-        board: applyBoardEnum,
-        id: z.string().describe('The job id from search_jobs/list_tracked_jobs.'),
+        url: z
+          .string()
+          .optional()
+          .describe(
+            'Direct link to a Greenhouse or Lever job posting, e.g. ' +
+              'https://boards.greenhouse.io/acme/jobs/123 or https://jobs.lever.co/acme/<id>. ' +
+              'Takes precedence over board/id when given.',
+          ),
+        board: applyBoardEnum.optional(),
+        id: z.string().optional().describe('The job id from search_jobs/list_tracked_jobs.'),
         submit: z
           .boolean()
           .optional()
@@ -210,30 +250,50 @@ export function registerJobSourcingTools(server: McpServer, config: Config, logg
           .describe('Actually submit the application. Defaults to false (fill + screenshot only).'),
       },
     },
-    async ({ board, id, submit }) => {
+    async ({ url, board, id, submit }) => {
       const { ApplicationStore } = await importJobSourcing('store.js');
       const store = new ApplicationStore(jobSourcingData('applications.json'));
-      const tracked = (await store.list()).find((r: AnyModule) => r.board === board && r.id === id);
-      if (!tracked) {
-        throw new Error(`No tracked job for ${board}:${id}. Run search_jobs first.`);
+
+      let job: { board: 'greenhouse' | 'lever'; id: string; title: string; company: string; url: string; applyUrl: string };
+      if (url) {
+        const parsed = parseJobUrl(url);
+        if (!parsed) {
+          throw new Error(
+            `"${url}" isn't a recognized Greenhouse or Lever job URL. Auto-apply only supports ` +
+              'links under boards.greenhouse.io, job-boards.greenhouse.io, or jobs.lever.co — ' +
+              'other boards\' Terms of Service restrict automated applications.',
+          );
+        }
+        job = { board: parsed.board, id: parsed.id, title: '', company: parsed.company, url, applyUrl: url };
+      } else {
+        if (!board || !id) {
+          throw new Error(
+            'Provide either "url" (a direct Greenhouse/Lever job link) or both "board" and ' +
+              '"id" (from search_jobs/list_tracked_jobs).',
+          );
+        }
+        const tracked = (await store.list()).find((r: AnyModule) => r.board === board && r.id === id);
+        if (!tracked) {
+          throw new Error(`No tracked job for ${board}:${id}. Run search_jobs first, or pass "url" directly.`);
+        }
+        job = {
+          board,
+          id: tracked.id,
+          title: tracked.title,
+          company: tracked.company,
+          url: tracked.url,
+          applyUrl: tracked.url,
+        };
       }
 
       const client = await makeClient(config);
       const { loadCandidateProfile } = await importJobSourcing('profile.js');
       const profile = await loadCandidateProfile(jobSourcingConfig('candidate.json'));
 
-      const modName = board === 'greenhouse' ? 'apply/greenhouse-apply.js' : 'apply/lever-apply.js';
-      const fnName = board === 'greenhouse' ? 'applyOnGreenhouse' : 'applyOnLever';
+      const modName = job.board === 'greenhouse' ? 'apply/greenhouse-apply.js' : 'apply/lever-apply.js';
+      const fnName = job.board === 'greenhouse' ? 'applyOnGreenhouse' : 'applyOnLever';
       const { [fnName]: apply } = await importJobSourcing(modName);
 
-      const job = {
-        board: tracked.board,
-        id: tracked.id,
-        title: tracked.title,
-        company: tracked.company,
-        url: tracked.url,
-        applyUrl: tracked.url,
-      };
       const result = await apply(client, job, profile, {
         dryRun: !submit,
         screenshotDir: jobSourcingData('screenshots'),
