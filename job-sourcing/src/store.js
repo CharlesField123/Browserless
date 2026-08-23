@@ -38,7 +38,19 @@ export class ApplicationStore {
     return Boolean(records[ApplicationStore.keyFor(job)]);
   }
 
-  async record(job, { status = 'seen', ...extra } = {}) {
+  /**
+   * `status` is intentionally *not* defaulted in the destructure: a caller
+   * passing `{ status: undefined }` (e.g. search re-recording an
+   * already-tracked job to refresh its title/url, without wanting to
+   * touch its status) means "leave status as it was" — falling through to
+   * the existing record's status, and only to 'seen' for a genuinely new
+   * one. Defaulting `status` in the parameter itself would make an
+   * explicit `undefined` clobber e.g. 'applied' back to 'seen' on every
+   * re-search, which is a real correctness hazard now that pollAndApply
+   * (../pipeline.js) relies on 'applied' meaning "already submitted,
+   * never retry".
+   */
+  async record(job, { status, ...extra } = {}) {
     const records = await this.#load();
     const key = ApplicationStore.keyFor(job);
     records[key] = {
@@ -48,7 +60,7 @@ export class ApplicationStore {
       title: job.title,
       company: job.company,
       url: job.url,
-      status,
+      status: status ?? records[key]?.status ?? 'seen',
       updatedAt: new Date().toISOString(),
       ...extra,
     };

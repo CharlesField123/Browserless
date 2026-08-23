@@ -20,8 +20,14 @@ import { logger } from '../logger.js';
  * the job description — can supply `answers` and re-run before submitting.
  *
  * This is deliberately conservative: it NEVER clicks submit unless
- * `dryRun: false` is passed explicitly, and it always screenshots the
- * filled form first so you can sanity-check the result.
+ * `dryRun: false` is passed explicitly, it always screenshots the filled
+ * form first so you can sanity-check the result, and even with
+ * `dryRun: false` it refuses to click submit if any *required* field
+ * (`el.required`/`aria-required`) went unanswered — better to return an
+ * unsubmitted, reviewable form (`blockedByRequiredFields: true`) than send
+ * something incomplete. This matters most for the fully-automated
+ * pollAndApply pipeline (../pipeline.js), which has no per-job human
+ * review step to catch it otherwise.
  */
 
 const FIELD_PATTERNS = [
@@ -102,6 +108,7 @@ async function describeFields(page) {
         tag,
         type: el.getAttribute('type') || 'text',
         name: labelFor(el),
+        required: el.required || el.getAttribute('aria-required') === 'true',
       };
       if (tag === 'select') {
         field.options = Array.from(el.options)
@@ -220,18 +227,27 @@ export async function autofillApplication(
     await page.screenshot({ path: screenshotPath, fullPage: true });
 
     let submitted = false;
+    const unansweredRequired = skipped.filter((f) => f.required);
+    const blockedByRequiredFields = unansweredRequired.length > 0;
     if (!dryRun) {
-      const submitButton = await page.$(
-        'button[type="submit"], input[type="submit"], button[aria-label*="submit" i]',
-      );
-      if (submitButton) {
-        await submitButton.click();
-        submitted = true;
+      if (blockedByRequiredFields) {
+        logger.warn(
+          `${job.board}:${job.id} has unanswered required field(s) — not submitting: ` +
+            unansweredRequired.map((f) => f.name).join(', '),
+        );
       } else {
-        logger.warn(`No submit button found for ${job.board}:${job.id} — leaving unsubmitted.`);
+        const submitButton = await page.$(
+          'button[type="submit"], input[type="submit"], button[aria-label*="submit" i]',
+        );
+        if (submitButton) {
+          await submitButton.click();
+          submitted = true;
+        } else {
+          logger.warn(`No submit button found for ${job.board}:${job.id} — leaving unsubmitted.`);
+        }
       }
     }
 
-    return { job, filled, skipped, screenshotPath, submitted, dryRun };
+    return { job, filled, skipped, screenshotPath, submitted, dryRun, blockedByRequiredFields };
   });
 }

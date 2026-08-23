@@ -7,6 +7,7 @@ import { ApplicationStore } from './store.js';
 import { GreenhouseAdapter } from './boards/greenhouse.js';
 import { LeverAdapter } from './boards/lever.js';
 import { logger } from './logger.js';
+import { pollAndApply, DEFAULT_LIMIT, MAX_LIMIT } from './pipeline.js';
 
 await loadEnvFile();
 
@@ -132,8 +133,97 @@ async function cmdApply() {
       ? 'DRY_RUN is on — nothing was submitted. Review the screenshot, then re-run with DRY_RUN=false to submit.'
       : result.submitted
         ? 'Application submitted.'
-        : 'Form filled but no submit button was found — submit manually.',
+        : result.blockedByRequiredFields
+          ? 'NOT submitted: a required field was left unanswered. Add it to --answers and re-run.'
+          : 'Form filled but no submit button was found — submit manually.',
   );
+}
+
+async function cmdPollApply() {
+  const [board, ...flags] = rest;
+  if (board !== 'greenhouse' && board !== 'lever') {
+    console.error(
+      'Usage: job-sourcing poll-apply <greenhouse|lever> [--companies=a,b] [--limit=N] ' +
+        '[--submit] [--answers=file.json] [--titles=a,b] [--keywords=a,b] [--locations=a,b]\n\n' +
+        "Only greenhouse and lever are supported for auto-apply — other boards' Terms of " +
+        'Service restrict automated applications.',
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  const flag = (name) => flags.find((f) => f.startsWith(`--${name}=`))?.slice(name.length + 3);
+  const list = (name) => flag(name)?.split(',').map((s) => s.trim()).filter(Boolean);
+
+  let companies = list('companies');
+  if (!companies?.length) {
+    const boardsConfig = await loadBoardsConfig();
+    companies = boardsConfig[board];
+  }
+  if (!companies?.length) {
+    console.error(
+      `No ${board} companies given. Pass --companies=a,b or add them to config/boards.json.`,
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  let answers = {};
+  const answersPath = flag('answers');
+  if (answersPath) {
+    try {
+      answers = JSON.parse(await readFile(answersPath, 'utf8'));
+    } catch (err) {
+      console.error(`Couldn't read --answers file at ${answersPath}: ${err.message}`);
+      process.exitCode = 1;
+      return;
+    }
+  }
+
+  const limitFlag = flag('limit');
+  const limit = limitFlag ? Number(limitFlag) : DEFAULT_LIMIT;
+  const submit = flags.includes('--submit');
+
+  console.log(
+    submit
+      ? `Polling ${board} (${companies.join(', ')}) and submitting up to ${Math.min(limit, MAX_LIMIT)} ` +
+        `new application(s) — no per-job review. Ctrl+C now to abort.`
+      : `Polling ${board} (${companies.join(', ')}) — DRY RUN, nothing will be submitted ` +
+        `(pass --submit to actually apply).`,
+  );
+
+  const profile = await loadCandidateProfile();
+  const client = new BrowserlessClient();
+  const store = new ApplicationStore();
+
+  const result = await pollAndApply({
+    client,
+    board,
+    companies,
+    query: { titles: list('titles'), keywords: list('keywords'), locations: list('locations') },
+    profile,
+    answers,
+    limit,
+    submit,
+    store,
+    screenshotDir: './data/screenshots',
+  });
+
+  console.log(
+    `Matched ${result.matched} job(s), attempted ${result.attempted}, submitted ${result.submitted}.`,
+  );
+  for (const r of result.results) {
+    const label = `${r.job.board}:${r.job.id}  ${r.job.title} @ ${r.job.company}`;
+    if (r.error) {
+      console.log(`  [error] ${label} — ${r.error}`);
+    } else if (r.submitted) {
+      console.log(`  [applied] ${label}`);
+    } else if (r.blockedByRequiredFields) {
+      console.log(`  [needs-answers] ${label} — required field(s) unanswered, see screenshot: ${r.screenshotPath}`);
+    } else {
+      console.log(`  [filled, dry-run] ${label} — screenshot: ${r.screenshotPath}`);
+    }
+  }
 }
 
 async function cmdList() {
@@ -149,22 +239,33 @@ async function cmdList() {
   }
 }
 
-const commands = { search: cmdSearch, apply: cmdApply, list: cmdList };
+const commands = { search: cmdSearch, apply: cmdApply, 'poll-apply': cmdPollApply, list: cmdList };
 
 if (!commands[command]) {
-  console.log(`Usage: job-sourcing <search|apply|list> [args]
+  console.log(`Usage: job-sourcing <search|apply|poll-apply|list> [args]
 
   search              Search all boards configured in config/boards.json
                       and record new results.
   apply <board>:<id>  Autofill (and, unless DRY_RUN=true, submit) an
-    [--answers=file]  application for a tracked job. Only Greenhouse and
-                      Lever support auto-apply. --answers points to a JSON
-                      file of {"field label": "answer"} for questions the
+    [--answers=file]  application for a tracked job, with a screenshot to
+                      review before submitting. Only Greenhouse and Lever
+                      support auto-apply. --answers points to a JSON file
+                      of {"field label": "answer"} for questions the
                       candidate profile can't cover (run once without it
                       to see which fields were skipped, then fill those
                       in and re-run).
+  poll-apply <board>  Search + autofill + (with --submit) apply, all in
+                      one shot, no per-job review — the automated
+                      counterpart to search+apply above. greenhouse or
+                      lever only. Flags: --companies=a,b (else uses
+                      config/boards.json), --limit=N (default 5, max 20
+                      applications per run), --submit (omit for a dry
+                      run), --answers=file.json, --titles/--keywords/
+                      --locations=a,b. Skips anything already applied;
+                      refuses to submit an application with an
+                      unanswered required field.
   list [status]       List tracked jobs, optionally filtered by status
-                      (seen | filled | applied).`);
+                      (seen | filled | needs-answers | applied).`);
   process.exitCode = command ? 1 : 0;
 } else {
   try {

@@ -85,6 +85,12 @@ node src/cli.js apply greenhouse:123456
 
 # 5. Once you've reviewed the screenshot and trust the autofill:
 DRY_RUN=false node src/cli.js apply greenhouse:123456
+
+# 6. Or, once you trust it across a whole board/query, not just one job:
+#    search + fill + submit a batch in one shot, no per-job review.
+node src/cli.js poll-apply greenhouse --companies=acme --limit=5
+# -> dry run by default; review the screenshots, THEN:
+node src/cli.js poll-apply greenhouse --companies=acme --limit=5 --submit
 ```
 
 See [`job-sourcing/README.md`](./job-sourcing/README.md) for the full CLI/API reference.
@@ -143,12 +149,23 @@ Please read this before enabling anything beyond Greenhouse/Lever.
   like LinkedIn "Easy Apply" are explicitly excluded — automating
   submissions there is against their terms and is also generally bad
   etiquette (employers can tell when an application is spam-filled).
-- **`DRY_RUN` defaults to `true`.** Autofill always screenshots the
-  filled form for your review before you opt into real submission.
-- **You are responsible for what you submit.** Review every autofilled
-  application; the matcher is best-effort pattern matching, not a
-  guarantee of correctness (salary expectations, work-authorization
-  answers, and free-text questions especially deserve a human look).
+- **`DRY_RUN` defaults to `true`, and `apply`/`apply_to_job` are one job
+  at a time with a screenshot to review before submitting.** That's the
+  path to use when you want to look at what's about to be sent.
+- **`poll-apply`/`poll_and_apply` (CLI and MCP respectively) are the
+  deliberate exception** — search, fill, and submit a batch in one call,
+  no per-job review. Real limitations, not just convention, back it up:
+  a hard cap on applications per call (default 5, max 20), never
+  re-applying to something already marked `applied`, and refusing to
+  submit any single application with an unanswered field the page itself
+  marks required. None of that is a substitute for a human having looked
+  at *some* of what this fills in for a given board/query before trusting
+  it at batch scale — run the first batch as a dry run, actually look at
+  the screenshots, before turning `submit`/`--submit` on for real.
+- **You are responsible for what you submit.** The matcher is best-effort
+  pattern matching, not a guarantee of correctness — salary expectations,
+  work-authorization answers, and free-text questions especially deserve
+  a human look, whichever apply path put them there.
 - This fork keeps upstream's SSPL/commercial dual license (see
   [LICENSE](./LICENSE)) unchanged. It's built here for personal use, not
   as a hosted service offered to others — if you want to offer this (or

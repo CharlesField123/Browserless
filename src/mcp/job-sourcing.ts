@@ -108,7 +108,7 @@ function parseJobUrl(rawUrl: string): { board: 'greenhouse' | 'lever'; company: 
 
 const boardEnum = z.enum(['greenhouse', 'lever', 'indeed', 'linkedin']);
 const applyBoardEnum = z.enum(['greenhouse', 'lever']);
-const statusEnum = z.enum(['seen', 'filled', 'applied']);
+const statusEnum = z.enum(['seen', 'filled', 'needs-answers', 'applied']);
 
 export function registerJobSourcingTools(server: McpServer, config: Config, logger: Logger): void {
   server.registerTool(
@@ -317,12 +317,15 @@ export function registerJobSourcingTools(server: McpServer, config: Config, logg
         answers,
       });
 
-      await store.record(job, { status: result.submitted ? 'applied' : 'filled' });
+      await store.record(job, {
+        status: result.submitted ? 'applied' : result.blockedByRequiredFields ? 'needs-answers' : 'filled',
+      });
 
       const screenshot = await readFile(result.screenshotPath);
       const skippedDetail = result.skipped.map((f: AnyModule) => {
         const options = f.options?.length ? ` [options: ${f.options.join(' | ')}]` : '';
-        return `- "${f.name}" (${f.tag}${f.type && f.type !== 'text' ? `/${f.type}` : ''})${options}`;
+        const req = f.required ? ' REQUIRED' : '';
+        return `- "${f.name}" (${f.tag}${f.type && f.type !== 'text' ? `/${f.type}` : ''}${req})${options}`;
       });
       const summary = [
         `Filled ${result.filled.length} field(s), skipped ${result.skipped.length}.`,
@@ -332,11 +335,14 @@ export function registerJobSourcingTools(server: McpServer, config: Config, logg
           : '',
         result.submitted
           ? 'Application submitted.'
-          : submit
-            ? 'Form filled but no submit button was found — submit manually.'
-            : 'Not submitted (dry run). Review the screenshot and skipped fields above, then ' +
-              'call apply_to_job again (with "answers" for anything worth filling, and ' +
-              'submit=true) to send it.',
+          : result.blockedByRequiredFields
+            ? 'NOT submitted: at least one REQUIRED field above was left unanswered — submitting ' +
+              'an incomplete application is worse than not submitting. Add it to "answers" and call again.'
+            : submit
+              ? 'Form filled but no submit button was found — submit manually.'
+              : 'Not submitted (dry run). Review the screenshot and skipped fields above, then ' +
+                'call apply_to_job again (with "answers" for anything worth filling, and ' +
+                'submit=true) to send it.',
       ]
         .filter(Boolean)
         .join('\n');
@@ -351,6 +357,107 @@ export function registerJobSourcingTools(server: McpServer, config: Config, logg
           },
         ],
       };
+    },
+  );
+
+  server.registerTool(
+    'poll_and_apply',
+    {
+      description:
+        'Search a board and, in one shot, autofill AND submit each new matching job — no ' +
+        'per-job screenshot review in between. This is the fully-automated counterpart to ' +
+        'search_jobs -> review -> apply_to_job(submit:true): use THIS when the human has ' +
+        'said to just go apply to things matching a query, not review each one first. Only ' +
+        'greenhouse and lever (same ToS-driven restriction as apply_to_job).\n\n' +
+        'Because nothing reviews an application before it sends, this always: caps how many ' +
+        'it submits per call via "limit" (default 5, hard max 20 — raise it deliberately, ' +
+        "not by default); never re-applies to a job already marked applied; and refuses to " +
+        'submit any single application with an unanswered field marked required on the page ' +
+        '(reported back per-job as blockedByRequiredFields, status "needs-answers" — use ' +
+        'apply_to_job with tailored "answers" for those, one at a time). Pass "answers" here ' +
+        'too for questions that apply across the whole batch (e.g. work authorization); it is ' +
+        'the same for every job in this call, so keep it to things that genuinely are.\n\n' +
+        'submit defaults to false — that runs the whole pipeline (search, fill, screenshot) ' +
+        "without sending anything, so you can sanity-check the first batch before turning " +
+        'submit on for real.',
+      inputSchema: {
+        board: applyBoardEnum,
+        companies: z
+          .array(z.string())
+          .optional()
+          .describe('Board slugs to search. Defaults to config/boards.json.'),
+        titles: z.array(z.string()).optional(),
+        keywords: z.array(z.string()).optional(),
+        locations: z.array(z.string()).optional(),
+        answers: z
+          .record(z.string())
+          .optional()
+          .describe('Applied to every job in this batch — see apply_to_job\'s "answers".'),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(20) // must match job-sourcing/src/pipeline.js's MAX_LIMIT
+          .optional()
+          .default(5)
+          .describe('Max applications to submit in this call (1-20, default 5).'),
+        submit: z
+          .boolean()
+          .optional()
+          .default(false)
+          .describe('Actually submit. Defaults to false (fill + screenshot every match, send nothing).'),
+      },
+    },
+    async ({ board, companies, titles, keywords, locations, answers, limit, submit }) => {
+      const boardsConfig = await loadBoardsConfig();
+      const slugs = companies?.length ? companies : boardsConfig[board];
+      if (!slugs?.length) {
+        throw new Error(
+          `No ${board} companies given, and none configured in job-sourcing/config/boards.json. ` +
+            `Pass "companies" (e.g. ["stripe"]) or add them to boards.json.`,
+        );
+      }
+
+      const client = await makeClient(config);
+      const { ApplicationStore } = await importJobSourcing('store.js');
+      const store = new ApplicationStore(jobSourcingData('applications.json'));
+      const { loadCandidateProfile } = await importJobSourcing('profile.js');
+      const profile = await loadCandidateProfile(jobSourcingConfig('candidate.json'));
+      const { pollAndApply } = await importJobSourcing('pipeline.js');
+
+      const result = await pollAndApply({
+        client,
+        board,
+        companies: slugs,
+        query: { titles, keywords, locations },
+        profile,
+        answers,
+        limit,
+        submit,
+        store,
+        screenshotDir: jobSourcingData('screenshots'),
+      });
+
+      logger.info(
+        `MCP poll_and_apply: ${board} matched ${result.matched}, attempted ${result.attempted}, ` +
+          `submitted ${result.submitted}`,
+      );
+
+      const lines = result.results.map((r: AnyModule) => {
+        const label = `${r.job.board}:${r.job.id} "${r.job.title}" @ ${r.job.company}`;
+        if (r.error) return `- [error] ${label} — ${r.error}`;
+        if (r.submitted) return `- [applied] ${label}`;
+        if (r.blockedByRequiredFields) {
+          return `- [needs-answers] ${label} — required field(s) unanswered`;
+        }
+        return `- [filled, dry-run] ${label}`;
+      });
+
+      return textResult(
+        `Matched ${result.matched} job(s) on ${board}, ${result.newlySeen} new. ` +
+          `Attempted ${result.attempted} (limit ${result.limit}), submitted ${result.submitted}.\n\n` +
+          (lines.length ? lines.join('\n') : 'Nothing new to attempt this call.'),
+      );
     },
   );
 }

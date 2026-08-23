@@ -26,7 +26,19 @@ node src/cli.js list                # list all tracked jobs
 node src/cli.js list applied        # filter by status: seen | filled | applied
 node src/cli.js apply <board>:<id>  # autofill (dry-run by default)
 node src/cli.js apply <board>:<id> --answers=answers.json  # + custom per-application answers
+node src/cli.js poll-apply greenhouse --companies=acme --limit=5           # search+fill+apply, no per-job review (dry-run by default)
+node src/cli.js poll-apply greenhouse --companies=acme --limit=5 --submit  # same, for real
 ```
+
+`poll-apply` is the batch/automated counterpart to `apply` — it searches,
+autofills, and (with `--submit`) submits every new match up to `--limit`
+(default 5, hard max 20) in one shot, no per-job screenshot review. It
+still refuses to submit any single application with an unanswered field
+the page marks required (reported as `needs-answers`, not silently sent
+incomplete), and it never re-applies to something already `applied`. See
+[`../JOB_SOURCING.md`](../JOB_SOURCING.md)'s Ethics section before relying
+on this — `apply` (one job, reviewed) is the safer default; use `poll-apply`
+deliberately, not as a habit.
 
 The candidate profile can't anticipate a given company's custom screening
 questions. Run `apply` once without `--answers`, check the printed "Skipped
@@ -67,6 +79,11 @@ src/
                         open-source /function HTTP endpoint.
   profile.js            Loads + validates config/candidate.json.
   store.js              JSON-file dedupe/status tracker (data/applications.json).
+                         Statuses: seen -> filled | needs-answers -> applied.
+  pipeline.js            pollAndApply: search + autofill + submit a batch
+                         in one call, with its own guardrails (limit,
+                         never re-apply, refuse incomplete submissions) —
+                         see apply/autofill.js's blockedByRequiredFields.
   throttle.js           Human-scale delays between actions.
   boards/
     base.js              Adapter contract + query matching.
@@ -76,9 +93,11 @@ src/
     linkedin.js            Browser-driven search (opt-in, read-only).
   apply/
     autofill.js           Generic label-driven form filler + screenshot.
+                         Blocks submission on any unanswered field the
+                         page marks required.
     greenhouse-apply.js    Greenhouse entry point.
     lever-apply.js          Lever entry point.
-  cli.js                 search | apply | list
+  cli.js                 search | apply | poll-apply | list
 test/
   basic.test.js          node:test unit tests (run: npm test)
 ```

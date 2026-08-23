@@ -53,6 +53,7 @@ below.
 | `search_jobs` | Only for indeed/linkedin | Searches a board, records new results as "seen" |
 | `list_tracked_jobs` | No | Lists jobs found so far, optionally by status |
 | `apply_to_job` | Yes | Autofills a Greenhouse/Lever application, returns a screenshot |
+| `poll_and_apply` | Yes | Searches + autofills + (optionally) submits a batch, one call, no per-job review |
 
 `apply_to_job` doesn't require going through `search_jobs` first — pass it
 a `url` directly (a `boards.greenhouse.io`, `job-boards.greenhouse.io`, or
@@ -104,6 +105,45 @@ job description and company context — can compose a real answer:
 for the same field, so it's also how to override a profile default for one
 specific application (a different desired-start-date for a role with an
 unusual notice period, say) without editing `candidate.json`.
+
+### `poll_and_apply`: search, fill, and submit in one shot
+
+`apply_to_job` is deliberately manual — one job at a time, with a review
+step. `poll_and_apply` is the other mode: point it at a board/query and it
+searches, autofills, and (with `submit: true`) submits every new match, up
+to a limit, in a single call. Use this when the human has actually said to
+go apply to things matching some criteria, not "show me what you'd apply
+to" — that's what a plain `search_jobs` + reviewing a few `apply_to_job`
+calls is for.
+
+Since there's no human looking at each application before it sends, it
+carries its own guardrails, not just the Greenhouse/Lever restriction:
+
+- **`limit`** (default 5, hard-capped at 20 — enforced by the tool schema,
+  not just convention) bounds how many applications one call can submit.
+  Some boards return far more matches than that (a staffing firm's
+  Greenhouse board can have 1,000+ open reqs) — `limit` is what stops a
+  single call from applying to all of them.
+- **Never re-applies.** A job already tracked as `applied` is skipped,
+  even across separate calls — see `job-sourcing/src/store.js`'s
+  `record()`, which preserves an existing status rather than resetting it
+  every time a search re-touches that job.
+- **Refuses to submit an incomplete application.** If any field the page
+  itself marks `required` goes unanswered (profile didn't cover it, and it
+  wasn't in this call's `answers`), that one job is filled and
+  screenshotted but not submitted — status `needs-answers` — rather than
+  sent broken. Follow up on those individually with `apply_to_job` and
+  answers tailored to that specific job.
+- **`submit` still defaults to `false`.** The very first call for a new
+  query is worth running as a dry run — it fills and screenshots every
+  match up to the limit without sending anything, so you can sanity-check
+  a whole batch before trusting `submit: true` on it.
+
+`answers` here applies to *every* job in the batch, so keep it to things
+that are genuinely the same across postings (work authorization, general
+availability) — not "why this company," which needs a human/Claude reading
+each specific job description, which is what the manual `apply_to_job`
+flow is for.
 
 ## Persisting your config
 
