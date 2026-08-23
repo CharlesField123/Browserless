@@ -2,11 +2,11 @@
   "name": "@browserless.io/browserless",
   "version": "2.56.0",
   "license": "SSPL",
-  "description": "The browserless platform",
+  "description": "The browserless platform (job-sourcing fork — see JOB_SOURCING.md)",
   "author": "browserless.io",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/browserless/browserless.git"
+    "url": "git+https://github.com/CharlesField123/Browserless.git"
   },
   "type": "module",
   "types": "./build/exports.d.ts",

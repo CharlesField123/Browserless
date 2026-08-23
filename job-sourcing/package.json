@@ -1,0 +1,22 @@
+{
+  "name": "@browserless-fork/job-sourcing",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Job search, tracking, and application-autofill toolkit built on top of this Browserless fork.",
+  "type": "module",
+  "bin": {
+    "job-sourcing": "./src/cli.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "search": "node src/cli.js search",
+    "apply": "node src/cli.js apply",
+    "list": "node src/cli.js list",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "puppeteer-core": "25.8.0"
+  }
+}

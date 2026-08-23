@@ -1,0 +1,25 @@
+# Runs this fork's Browserless server with a persistent volume, so
+# per-board browser profiles (LinkedIn/Indeed login sessions, launched
+# with a `trackingId` from job-sourcing/) survive container restarts.
+#
+# Usage:
+#   docker compose -f docker-compose.job-sourcing.yml up -d
+#
+# See JOB_SOURCING.md for how job-sourcing/ uses this.
+services:
+  browserless:
+    image: ghcr.io/browserless/chromium
+    ports:
+      - '3000:3000'
+    environment:
+      # Set a token and put the same value in job-sourcing/.env
+      # (BROWSERLESS_TOKEN) once you're not just running this locally.
+      - TOKEN=${BROWSERLESS_TOKEN:-}
+      - CONCURRENT=${BROWSERLESS_CONCURRENT:-2}
+      - TIMEOUT=${BROWSERLESS_TIMEOUT:-120000}
+    volumes:
+      - browserless-profiles:/tmp/job-sourcing-profiles
+    restart: unless-stopped
+
+volumes:
+  browserless-profiles:

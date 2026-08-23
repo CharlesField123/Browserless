@@ -1,0 +1,42 @@
+{
+  "$schema": "./candidate.schema.json",
+  "fullName": "Jordan Candidate",
+  "firstName": "Jordan",
+  "lastName": "Candidate",
+  "email": "jordan.candidate@example.com",
+  "phone": "+1-555-010-0100",
+  "location": {
+    "city": "New York",
+    "state": "NY",
+    "country": "United States"
+  },
+  "links": {
+    "linkedin": "https://www.linkedin.com/in/jordan-candidate",
+    "github": "https://github.com/jordan-candidate",
+    "portfolio": "https://jordancandidate.dev"
+  },
+  "resumePath": "./config/resume.pdf",
+  "coverLetterPath": "./config/cover-letter.pdf",
+  "coverLetterTemplate": "Dear {{company}} team,\n\nI'm excited to apply for the {{title}} role. ...",
+  "workAuthorization": {
+    "authorizedToWorkInCountry": true,
+    "requiresSponsorship": false
+  },
+  "eeo": {
+    "gender": "Decline to answer",
+    "race": "Decline to answer",
+    "veteranStatus": "Decline to answer",
+    "disabilityStatus": "Decline to answer"
+  },
+  "defaultAnswers": {
+    "How did you hear about this position?": "Company careers page",
+    "Desired salary": "Negotiable, open to discussing based on scope",
+    "Earliest start date": "2 weeks notice"
+  },
+  "search": {
+    "titles": ["Software Engineer", "Backend Engineer"],
+    "locations": ["Remote", "New York, NY"],
+    "keywords": ["typescript", "node.js"],
+    "excludeCompanies": []
+  }
+}

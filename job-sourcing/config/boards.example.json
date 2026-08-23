@@ -1,0 +1,6 @@
+{
+  "greenhouse": ["airbnb", "stripe"],
+  "lever": ["netflix"],
+  "indeed": true,
+  "linkedin": false
+}

@@ -29,3 +29,9 @@ coverage
 
 # Dev Files
 *.env*
+
+# Job Sourcing toolkit: personal data and local run state, never commit these
+job-sourcing/config/candidate.json
+job-sourcing/config/boards.json
+job-sourcing/data/
+!job-sourcing/.env.example

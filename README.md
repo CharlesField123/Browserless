@@ -1,5 +1,11 @@
 <!-- markdownlint-disable commands-show-output first-line-h1 no-emphasis-as-heading no-inline-html -->
 
+> **This is a fork of [browserless/browserless](https://github.com/browserless/browserless)**
+> tailored for job sourcing, search automation, and application autofill.
+> Everything below is unmodified upstream Browserless — for what's new in
+> this fork, see **[JOB_SOURCING.md](./JOB_SOURCING.md)** and
+> [`job-sourcing/`](./job-sourcing).
+
 <div align="center">
   <a href="https://browserless.io?utm_source=github&utm_medium=referral&utm_campaign=oss-readme&utm_content=top-banner" align="center">
     <center align="center">
