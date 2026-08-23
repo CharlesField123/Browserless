@@ -70,12 +70,23 @@ function matchProfileValue(fieldName, profile, job) {
  * path when a caller copies a field name verbatim from a previous
  * autofillApplication result's `skipped` list — then falls back to a
  * substring match either direction for minor label drift.
+ *
+ * Some fields describeFields() walks have no usable label at all (custom
+ * widgets' internal sub-elements, reported upstream as an empty-string
+ * name) — `target` is `""` for those. Every string's `.includes("")` is
+ * `true` in JS, so without the `target &&` guard below, the substring
+ * fallback's `q.includes(target)` check was trivially true for ANY
+ * answer key against ANY blank-labelled field, silently handing it
+ * whichever answer happened to be first in iteration order rather than
+ * correctly falling through to "unanswered". A blank label has nothing
+ * to substring-match against, so it must never match here.
  */
 export function findAnswer(fieldName, answers = {}) {
   const target = fieldName.trim().toLowerCase();
   for (const [question, value] of Object.entries(answers)) {
     if (question.trim().toLowerCase() === target) return value;
   }
+  if (!target) return undefined;
   for (const [question, value] of Object.entries(answers)) {
     const q = question.trim().toLowerCase();
     if (q && (target.includes(q) || q.includes(target))) return value;

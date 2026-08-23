@@ -112,6 +112,18 @@ test('findAnswer matches exact label first, then substring either direction', ()
   assert.equal(findAnswer('Anything', {}), undefined);
 });
 
+test('findAnswer never matches a blank field label against any answer', () => {
+  // Regression test: JS's ''.includes('') (and 'anything'.includes(''))
+  // is always true, so the substring fallback used to treat an empty
+  // field label as matching every answer key — silently handing a
+  // blank-labelled field (describeFields() reports these for custom
+  // widgets' unnamed internal sub-elements) whichever answer happened to
+  // be first in iteration order.
+  const answers = { Country: 'United States', 'Current Company': 'Acme' };
+  assert.equal(findAnswer('', answers), undefined);
+  assert.equal(findAnswer('   ', answers), undefined);
+});
+
 test('resolveFieldValue prefers a per-application answer over the static profile', () => {
   const profile = { email: 'a@example.com', defaultAnswers: { 'Start date': 'Immediately' } };
   assert.equal(resolveFieldValue('Email', profile, {}, {}), 'a@example.com');
