@@ -77,7 +77,14 @@ src/
   client.js            BrowserlessClient — thin wrapper over this fork's
                         WS endpoint (stealth/blockAds/trackingId) and its
                         open-source /function HTTP endpoint.
-  profile.js            Loads + validates config/candidate.json.
+  profile.js            loadCandidateProfile (strict, throws if incomplete),
+                         readCandidateProfileRaw (lenient, for inspection),
+                         saveCandidateProfile/mergeProfile (partial update —
+                         nested objects like defaultAnswers merge, not replace).
+  uploads.js             saveUploadedFile: writes a base64-decoded file to
+                         disk with a sanitized filename (path traversal safe).
+                         Used by the MCP upload_resume tool to get a resume
+                         onto a remote deployment with no filesystem access.
   store.js              JSON-file dedupe/status tracker (data/applications.json).
                          Statuses: seen -> filled | needs-answers -> applied.
   pipeline.js            pollAndApply: search + autofill + submit a batch

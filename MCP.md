@@ -18,8 +18,7 @@ in the main [README.md](./README.md)'s Premium Features). That's a separate,
 hosted offering tied to a browserless.io cloud account. This is a small,
 self-hosted MCP endpoint this fork adds on top of the open-source server,
 purpose-built for job-sourcing — it doesn't expose Browserless's general
-screenshot/PDF/scrape APIs as MCP tools, just the five job-sourcing ones
-below.
+screenshot/PDF/scrape APIs as MCP tools, just the job-sourcing ones below.
 
 ## Setting it up
 
@@ -29,31 +28,60 @@ below.
    published base image, which doesn't have the MCP SDK dependency this
    endpoint needs — see the comment at the top of `docker/railway/Dockerfile`).
 2. Set `TOKEN` on the Railway service (required — see RAILWAY.md).
-3. Put your candidate profile and boards config where the *server* can read
-   them: `job-sourcing/config/candidate.json` and `job-sourcing/config/boards.json`
-   inside the running container. Since Railway's disk is ephemeral, attach a
-   volume (see "Persisting your config" below) rather than expecting these
-   to survive a redeploy on their own.
-4. In claude.ai: **Settings → Connectors → Add custom connector**, URL:
+3. In claude.ai: **Settings → Connectors → Add custom connector**, URL:
 
    ```
    https://<your-app>.up.railway.app/mcp?token=<TOKEN>
    ```
 
-5. Claude will call `initialize` and `tools/list` automatically. Try asking
-   something like *"search Greenhouse for backend engineer roles at Stripe"*
-   or *"what jobs have I already found?"*
+4. Claude will call `initialize` and `tools/list` automatically. Set up
+   your candidate profile right from the chat — ask Claude to call
+   `set_candidate_profile` with your name/email/etc. and `upload_resume`
+   with your resume, no server filesystem access needed for either. Then
+   try *"search Greenhouse for backend engineer roles at Stripe"* or
+   *"what jobs have I already found?"*
+5. Since Railway's disk is ephemeral, that profile won't survive a
+   redeploy on its own — see "Persisting your config" below once you've
+   got one you want to keep.
 
 ## The tools
 
 | Tool | Needs a browser? | What it does |
 |---|---|---|
 | `list_boards` | No | Reads `job-sourcing/config/boards.json` |
-| `get_candidate_profile` | No | Reads `job-sourcing/config/candidate.json` |
+| `get_candidate_profile` | No | Reads `job-sourcing/config/candidate.json` (works even if incomplete) |
+| `set_candidate_profile` | No | Creates/updates the profile — partial update, merges nested fields |
+| `upload_resume` | No | Uploads a resume/cover letter file, points the profile at it |
 | `search_jobs` | Only for indeed/linkedin | Searches a board, records new results as "seen" |
 | `list_tracked_jobs` | No | Lists jobs found so far, optionally by status |
 | `apply_to_job` | Yes | Autofills a Greenhouse/Lever application, returns a screenshot |
 | `poll_and_apply` | Yes | Searches + autofills + (optionally) submits a batch, one call, no per-job review |
+
+### Building the candidate profile entirely through the connector
+
+`set_candidate_profile` and `upload_resume` exist because a Railway
+deployment has no filesystem access from the outside — before these, the
+only way to get `job-sourcing/config/candidate.json` populated was `railway
+ssh`/a volume you uploaded to by hand. Now the whole thing can happen in
+chat:
+
+1. `set_candidate_profile({fullName, email, phone, links, ...})` — every
+   field is optional and calls merge rather than replace, so you can build
+   it up incrementally. `get_candidate_profile` shows current progress
+   (and which required fields are still missing) at any point, even before
+   the profile is complete enough for `apply_to_job` to work.
+2. `upload_resume({kind: "resume", filename: "resume.pdf", contentBase64:
+   "..."})` — actually writes the file and points `resumePath` at it.
+   `resumePath` set via `set_candidate_profile` alone is just a string;
+   this is what makes it real.
+3. `defaultAnswers` in `set_candidate_profile` is also how to permanently
+   save answers to recurring custom questions ("are you authorized to work
+   in this country?") so future applications use them automatically,
+   instead of passing `answers` on every `apply_to_job`/`poll_and_apply`
+   call. Setting one new question's answer merges in alongside whatever
+   was already saved — it does not erase the others. For a one-off answer
+   specific to a single application, prefer that call's own `answers`
+   parameter instead of saving it here permanently.
 
 `apply_to_job` doesn't require going through `search_jobs` first — pass it
 a `url` directly (a `boards.greenhouse.io`, `job-boards.greenhouse.io`, or
@@ -158,15 +186,13 @@ Two things need to survive a Railway redeploy:
    RAILWAY.md's "Persisting job-board logins" section.
 
 Attach a Railway volume mounted at `/usr/src/app/job-sourcing` (the whole
-directory — covers config, data, and profiles together) and either:
-
-- upload `candidate.json`/`boards.json` onto that volume once (e.g. via
-  `railway ssh` or a one-off `railway run` command), or
-- ask Claude to write them for you through the connector — there isn't a
-  dedicated MCP tool for this today, so that means asking it to run
-  something like a `/function` call that writes the file, or doing it via
-  `railway ssh` yourself. A dedicated `set_candidate_profile` tool would be
-  a reasonable follow-up if this comes up often.
+directory — covers config, data, and profiles together). Once it's
+mounted, build the profile itself through the connector — `set_candidate_profile`
+and `upload_resume` (see above) write straight onto that volume, no
+`railway ssh` or manual upload needed. The volume is what makes it survive
+the *next* redeploy; without one, a fresh container has an empty
+`job-sourcing/config/` again and the tools will say so clearly ("no
+candidate profile found") rather than fail silently.
 
 ## Stateless mode, and why GET/DELETE return 405
 

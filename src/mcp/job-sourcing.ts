@@ -131,13 +131,151 @@ export function registerJobSourcingTools(server: McpServer, config: Config, logg
     {
       description:
         'Returns the candidate profile (contact info, resume path, search preferences) ' +
-        'used to autofill job applications, from job-sourcing/config/candidate.json.',
+        'used to autofill job applications, from job-sourcing/config/candidate.json. Works ' +
+        'even on a profile that is still incomplete (unlike apply_to_job/poll_and_apply, ' +
+        'which require fullName/email/resumePath) — use this to check progress while ' +
+        'building one up with set_candidate_profile.',
       inputSchema: {},
     },
     async () => {
-      const { loadCandidateProfile } = await importJobSourcing('profile.js');
-      const profile = await loadCandidateProfile(jobSourcingConfig('candidate.json'));
-      return textResult(JSON.stringify(profile, null, 2));
+      const { readCandidateProfileRaw, REQUIRED_FIELDS } = await importJobSourcing('profile.js');
+      const profile = await readCandidateProfileRaw(jobSourcingConfig('candidate.json'));
+      if (!profile) {
+        return textResult(
+          'No candidate profile yet at job-sourcing/config/candidate.json. Use ' +
+            'set_candidate_profile to create one.',
+        );
+      }
+      const missing = REQUIRED_FIELDS.filter((f: string) => !profile[f]);
+      return textResult(
+        (missing.length
+          ? `Missing required field(s) before apply_to_job/poll_and_apply will work: ` +
+            `${missing.join(', ')}.\n\n`
+          : '') + JSON.stringify(profile, null, 2),
+      );
+    },
+  );
+
+  server.registerTool(
+    'set_candidate_profile',
+    {
+      description:
+        'Creates or updates the candidate profile (job-sourcing/config/candidate.json) used ' +
+        'by apply_to_job/poll_and_apply. This is the way to get a profile onto a remote ' +
+        'deployment where there is no filesystem access otherwise — and the way to ' +
+        'permanently save answers to recurring custom application questions, via ' +
+        '"defaultAnswers", so future applications use them automatically instead of needing ' +
+        '"answers" passed on every apply_to_job/poll_and_apply call.\n\n' +
+        'Every field is optional and only provided fields change — this does a partial ' +
+        'update, not a wholesale replace. For "defaultAnswers" (and location/links/' +
+        'workAuthorization/eeo) that means a MERGE: setting one new question\'s answer adds ' +
+        'it alongside whatever was already saved, it does not erase the others. Call ' +
+        'get_candidate_profile first to see the current state, especially while still ' +
+        'building the profile up across several calls.\n\n' +
+        'Note: "resumePath"/"coverLetterPath" here are just file paths, not file uploads — ' +
+        'setting one to a path does not put a file there. Use upload_resume to actually get ' +
+        'the file onto the server; it sets the matching path here automatically once it does.',
+      inputSchema: {
+        fullName: z.string().optional(),
+        firstName: z.string().optional(),
+        lastName: z.string().optional(),
+        email: z.string().optional(),
+        phone: z.string().optional(),
+        location: z
+          .object({ city: z.string().optional(), state: z.string().optional(), country: z.string().optional() })
+          .optional(),
+        links: z
+          .object({ linkedin: z.string().optional(), github: z.string().optional(), portfolio: z.string().optional() })
+          .optional(),
+        resumePath: z.string().optional().describe('Path on the server, e.g. ./config/resume.pdf. See note above.'),
+        coverLetterPath: z.string().optional(),
+        coverLetterTemplate: z
+          .string()
+          .optional()
+          .describe('Supports {{company}} and {{title}} placeholders.'),
+        workAuthorization: z
+          .object({
+            authorizedToWorkInCountry: z.boolean().optional(),
+            requiresSponsorship: z.boolean().optional(),
+          })
+          .optional(),
+        eeo: z
+          .object({
+            gender: z.string().optional(),
+            race: z.string().optional(),
+            veteranStatus: z.string().optional(),
+            disabilityStatus: z.string().optional(),
+          })
+          .optional(),
+        defaultAnswers: z
+          .record(z.string())
+          .optional()
+          .describe(
+            'Persistent answers for recurring custom application questions, merged into ' +
+              '(not replacing) whatever is already saved. Keyed by the field label as it ' +
+              'appears in apply_to_job\'s "skipped" list, e.g. {"Are you authorized to work ' +
+              'in this country?": "Yes"}. For a one-off answer specific to a single ' +
+              'application, prefer apply_to_job/poll_and_apply\'s own "answers" parameter ' +
+              'instead of saving it here permanently.',
+          ),
+        search: z
+          .object({
+            titles: z.array(z.string()).optional(),
+            locations: z.array(z.string()).optional(),
+            keywords: z.array(z.string()).optional(),
+            excludeCompanies: z.array(z.string()).optional(),
+          })
+          .optional()
+          .describe('Default search_jobs query when none is given explicitly. Arrays are replaced, not merged.'),
+      },
+    },
+    async (updates) => {
+      const { saveCandidateProfile, REQUIRED_FIELDS } = await importJobSourcing('profile.js');
+      const profile = await saveCandidateProfile(jobSourcingConfig('candidate.json'), updates);
+      const missing = REQUIRED_FIELDS.filter((f: string) => !profile[f]);
+      logger.info(`MCP set_candidate_profile: saved (missing: ${missing.join(', ') || 'none'})`);
+      return textResult(
+        `Saved to job-sourcing/config/candidate.json.\n\n` +
+          (missing.length
+            ? `Still missing required field(s) before apply_to_job/poll_and_apply will work: ` +
+              `${missing.join(', ')}.\n\n`
+            : '') +
+          JSON.stringify(profile, null, 2),
+      );
+    },
+  );
+
+  server.registerTool(
+    'upload_resume',
+    {
+      description:
+        'Uploads a file (resume or cover letter) onto this server and points the candidate ' +
+        'profile at it — the piece set_candidate_profile alone cannot do, since ' +
+        '"resumePath"/"coverLetterPath" there are just paths, not file contents. This is what ' +
+        'actually completes a profile built remotely (e.g. through this connector, with no ' +
+        'access to the deployed container\'s filesystem). Pass the file\'s raw bytes ' +
+        'base64-encoded; ask the human for the file if you do not already have its content.',
+      inputSchema: {
+        kind: z.enum(['resume', 'coverLetter']),
+        filename: z
+          .string()
+          .describe('e.g. "resume.pdf" — only its extension and characters matter, used for the saved file name.'),
+        contentBase64: z.string().describe("The file's raw bytes, base64-encoded."),
+      },
+    },
+    async ({ kind, filename, contentBase64 }) => {
+      const { saveUploadedFile } = await importJobSourcing('uploads.js');
+      const { saveCandidateProfile } = await importJobSourcing('profile.js');
+
+      const { path, bytes } = await saveUploadedFile(jobSourcingConfig(), filename, contentBase64);
+      const field = kind === 'resume' ? 'resumePath' : 'coverLetterPath';
+      const profile = await saveCandidateProfile(jobSourcingConfig('candidate.json'), { [field]: path });
+
+      logger.info(`MCP upload_resume: saved ${kind} (${bytes} bytes) to ${path}`);
+      return textResult(
+        `Saved ${kind} (${bytes} byte(s)) to ${path} and set "${field}" in the candidate profile.\n\n` +
+          JSON.stringify(profile, null, 2),
+      );
     },
   );
 
