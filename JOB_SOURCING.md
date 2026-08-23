@@ -49,6 +49,9 @@ engine with a dry-run safety net. `job-sourcing/` is that reusable layer.
   resume/cover letter, and screenshots the result. It **never submits**
   unless you explicitly set `DRY_RUN=false`.
 
+Deploying the server itself to Railway instead of running it locally? See
+[RAILWAY.md](./RAILWAY.md).
+
 ## Quick start
 
 ```bash
