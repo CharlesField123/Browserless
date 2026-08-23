@@ -1,0 +1,47 @@
+#!/usr/bin/env node
+
+'use strict';
+
+import { build } from 'esbuild';
+import fs from 'fs/promises';
+import { join } from 'path';
+import { nodeModulesPolyfillPlugin } from 'esbuild-plugins-node-modules-polyfill';
+
+const html = (contents) => `<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>browserless.io function runner</title>
+    <script type="module">
+    ${contents}
+    </script>
+  </head>
+  <body>
+  </body>
+</html>
+`;
+
+const entryPoints = ['src/shared/utils/function/client.ts'];
+const outfile = join(process.cwd(), 'static/function/client.js');
+const htmlLocation = join(process.cwd(), 'static/function/index.html');
+
+(async () => {
+  await build({
+    bundle: true,
+    entryPoints,
+    outfile,
+    plugins: [
+      nodeModulesPolyfillPlugin({
+        globals: {
+          process: false,
+        },
+      }),
+    ],
+  });
+  const contents = await fs.readFile(outfile, 'utf-8');
+  const final = html(contents);
+
+  await fs.writeFile(htmlLocation, final);
+})();

@@ -1,0 +1,13 @@
+name: Publish Latest Docker Images to GitHub Container Registry
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  publish:
+    uses: ./.github/workflows/docker-publish.yml
+    secrets: inherit
+    with:
+      tag: latest

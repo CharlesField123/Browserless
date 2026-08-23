@@ -1,0 +1,44 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    # Always increase the version requirement
+    # to match the new version.
+    versioning-strategy: increase
+    directory: '/'
+    schedule:
+      interval: daily
+    open-pull-requests-limit: 10
+    cooldown:
+      default-days: 3
+    ignore:
+      # TypeScript 7 (native/Go compiler) ships without a JS API; blocked until
+      # typescript-eslint and typescript-json-schema support it.
+      # See https://github.com/typescript-eslint/typescript-eslint/issues/10940
+      - dependency-name: typescript
+        update-types: ['version-update:semver-major']
+    groups:
+      types:
+        patterns:
+          - '@types/*'
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: docker
+    directory: '/docker'
+    schedule:
+      interval: daily
+    open-pull-requests-limit: 10
+    cooldown:
+      default-days: 3
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+    groups:
+      github-actions:
+        patterns:
+          - '*'

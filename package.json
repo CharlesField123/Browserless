@@ -1,0 +1,146 @@
+{
+  "name": "@browserless.io/browserless",
+  "version": "2.56.0",
+  "license": "SSPL",
+  "description": "The browserless platform",
+  "author": "browserless.io",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/browserless/browserless.git"
+  },
+  "type": "module",
+  "types": "./build/exports.d.ts",
+  "main": "./build/exports.js",
+  "exports": {
+    ".": "./build/exports.js"
+  },
+  "bin": {
+    "browserless": "bin/browserless.js"
+  },
+  "scripts": {
+    "build": "npm run clean && npm run build:ts && npm run install:adblock && npm run build:schemas && npm run build:devtools && npm run build:openapi",
+    "build:dev": "npm run build && npm run build:function && npm run install:debugger",
+    "build:devtools": "node scripts/install-devtools.js",
+    "build:function": "node scripts/build-function.js",
+    "build:schemas": "node scripts/build-schemas.js",
+    "build:openapi": "node scripts/build-open-api.js",
+    "build:ts": "tsc",
+    "build:tests": "npm run build:ts && npm run build:function && npm run install:debugger",
+    "changelog:versions": "node scripts/changelog-browser-versions.js",
+    "clean": "node scripts/clean.js",
+    "dev": "npm run build:dev && env-cmd -f .env node build",
+    "watch": "node scripts/watch.js",
+    "install:adblock": "node scripts/install-adblock.js",
+    "install:debugger": "node scripts/install-debugger.js",
+    "install:browsers": "node node_modules/playwright-core/cli.js install chromium firefox webkit msedge",
+    "install:dev": "npm run install:browsers && npm run install:debugger",
+    "lint": "cross-env eslint . --fix",
+    "prepack": "npm run build:dev",
+    "prettier": "prettier '{src,functions,scripts,bin,external,.github}/**/*.{js,ts,json,yml,yaml,md}' --log-level error --write",
+    "test": "npm run build:tests && cross-env DEBUG=quiet mocha",
+    "coverage": "npm run build:ts && c8 --reporter=text --reporter=html --reporter=lcov cross-env DEBUG=quiet mocha",
+    "start": "env-cmd -f .env node build",
+    "prepare": "husky"
+  },
+  "files": [
+    "assets/*",
+    "bin/*",
+    "build/*",
+    "docker/*",
+    "extensions/*",
+    "external/*",
+    "fonts/*",
+    "scripts/*",
+    "src/*",
+    "static/*",
+    "CHANGELOG.md",
+    "tsconfig.json"
+  ],
+  "dependencies": {
+    "@zorilla/puppeteer-extra": "^2.0.2",
+    "@zorilla/puppeteer-extra-plugin-stealth": "^2.0.1",
+    "ajv": "^8.20.0",
+    "debug": "^4.4.1",
+    "del": "^8.0.1",
+    "file-type": "^22.0.2",
+    "get-port": "^7.2.0",
+    "gradient-string": "^3.0.0",
+    "http-proxy": "^1.18.1",
+    "lighthouse": "^13.4.1",
+    "micromatch": "^4.0.8",
+    "playwright-1.58": "npm:playwright-core@1.58.2",
+    "playwright-1.59": "npm:playwright-core@1.59.1",
+    "playwright-1.60": "npm:playwright-core@1.60.0",
+    "playwright-1.61": "npm:playwright-core@1.61.1",
+    "playwright-core": "1.62.1",
+    "puppeteer-core": "25.8.0",
+    "queue": "^7.0.0",
+    "systeminformation": "^5.33.1",
+    "tar-fs": "^3.1.3",
+    "ws": "^8.21.3"
+  },
+  "devDependencies": {
+    "@types/chai": "^5.2.3",
+    "@types/debug": "^4.1.13",
+    "@types/gradient-string": "^1.1.6",
+    "@types/http-proxy": "^1.17.17",
+    "@types/micromatch": "^4.0.10",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^26.2.0",
+    "@types/sinon": "^22.0.0",
+    "@types/ws": "^8.5.13",
+    "@typescript-eslint/eslint-plugin": "^8.67.0",
+    "@typescript-eslint/parser": "^8.61.1",
+    "c8": "^12.0.0",
+    "chai": "^6.2.2",
+    "cross-env": "^10.1.0",
+    "env-cmd": "^11.0.0",
+    "esbuild": "^0.28.2",
+    "esbuild-plugins-node-modules-polyfill": "^1.8.3",
+    "eslint": "^10.8.1",
+    "gunzip-maybe": "^1.4.2",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.3.0",
+    "marked": "^18.0.10",
+    "mocha": "^12.0.0-rc.6",
+    "prettier": "3.9.6",
+    "sinon": "^22.1.0",
+    "typescript": "^6.0.3",
+    "typescript-json-schema": "^0.68.0"
+  },
+  "overrides": {
+    "esbuild-plugins-node-modules-polyfill": {
+      "esbuild": "$esbuild"
+    }
+  },
+  "playwrightVersions": {
+    "default": "playwright-core",
+    "1.62": "playwright-core",
+    "1.61": "playwright-1.61",
+    "1.60": "playwright-1.60",
+    "1.59": "playwright-1.59",
+    "1.58": "playwright-1.58"
+  },
+  "engines": {
+    "node": ">=24",
+    "npm": ">=11.10.0"
+  },
+  "mocha": {
+    "bail": true,
+    "extension": [
+      "js"
+    ],
+    "spec": "build/**/*.spec.js",
+    "timeout": 45000,
+    "slow": 5000
+  },
+  "prettier": {
+    "semi": true,
+    "trailingComma": "all",
+    "singleQuote": true,
+    "printWidth": 80
+  },
+  "lint-staged": {
+    "**/*": "prettier --write --ignore-unknown"
+  }
+}

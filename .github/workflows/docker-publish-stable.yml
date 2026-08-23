@@ -1,0 +1,12 @@
+name: Publish Semantic Version Docker Images to GitHub Container Registry
+
+on:
+  push:
+    tags: [v2.*]
+
+jobs:
+  publish:
+    uses: ./.github/workflows/docker-publish.yml
+    secrets: inherit
+    with:
+      tag: ${{ github.ref_name }}

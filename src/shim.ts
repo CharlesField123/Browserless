@@ -1,0 +1,131 @@
+import * as http from 'http';
+import {
+  CDPLaunchOptions,
+  convertIfBase64,
+  safeParse,
+} from '@browserless.io/browserless';
+
+const shimParam = [
+  'headless',
+  'stealth',
+  'ignoreDefaultArgs',
+  'slowMo',
+  'ignoreHTTPSErrors',
+];
+
+/**
+ * Obfuscates the ?token parameter by shifting it to a header instead of a query-parameter.
+ */
+export function moveTokenToHeader(req: http.IncomingMessage): string {
+  const parsed = new URL(req.url || '', 'http://localhost');
+  const token = parsed.searchParams.get('token');
+
+  if (token) {
+    parsed.searchParams.delete('token');
+    req.headers.authorization = req.headers.authorization ?? `Bearer ${token}`;
+    req.url = parsed.pathname + parsed.search;
+  }
+
+  return req.url!;
+}
+
+/**
+ * Given a legacy connect or API call, this shim will
+ * re-order the arguments to make them valid in the 2.0
+ * world as much as possible. It does not handle request
+ * validation as that happens later downstream.
+ *
+ * @param req A parsed user requests
+ */
+export function shimLegacyRequests(url: URL): URL {
+  const { searchParams } = url;
+  const params = [...searchParams];
+  const names = params.map(([k]) => k);
+
+  const cliSwitches = params.filter(([name]) => name.startsWith('--'));
+  const hasLegacyParams =
+    cliSwitches.length || shimParam.some((name) => names.includes(name));
+
+  if (hasLegacyParams) {
+    const parsedLaunch = safeParse(
+      convertIfBase64(searchParams.get('launch') || '{}'),
+    );
+    // The shim writes onto launchParams below, so fall back to {} unless the
+    // parsed value is a plain object — a primitive/array `launch` would throw.
+    const launchParams = (
+      parsedLaunch &&
+      typeof parsedLaunch === 'object' &&
+      !Array.isArray(parsedLaunch)
+        ? parsedLaunch
+        : {}
+    ) as CDPLaunchOptions;
+    const ignoreDefaultArgs =
+      searchParams.get('ignoreDefaultArgs') ?? launchParams.ignoreDefaultArgs;
+    const ignoreHTTPSErrors =
+      searchParams.get('ignoreHTTPSErrors') ?? launchParams.ignoreHTTPSErrors;
+    const stealth = searchParams.get('stealth') ?? launchParams.stealth;
+    const slowMo = searchParams.get('slowMo') ?? launchParams.slowMo;
+    const headless = searchParams.get('headless') ?? launchParams.headless;
+
+    if (
+      typeof headless !== 'undefined' &&
+      launchParams.headless === undefined
+    ) {
+      launchParams.headless =
+        headless === 'shell' ? 'shell' : headless !== 'false';
+    }
+
+    if (typeof slowMo !== 'undefined' && launchParams.slowMo === undefined) {
+      launchParams.slowMo = +slowMo;
+    }
+
+    if (typeof stealth !== 'undefined' && launchParams.stealth === undefined) {
+      launchParams.stealth = stealth !== 'false';
+    }
+
+    if (
+      typeof ignoreHTTPSErrors !== 'undefined' &&
+      launchParams.ignoreHTTPSErrors === undefined
+    ) {
+      launchParams.ignoreHTTPSErrors = ignoreHTTPSErrors !== 'false';
+    }
+
+    // When acceptInsecureCerts is set, ignoreHTTPSErrors is ignored
+    if (launchParams.acceptInsecureCerts !== undefined) {
+      launchParams.ignoreHTTPSErrors = undefined;
+    }
+
+    // When ignoreHTTPSErrors sent, convert it to acceptInsecureCerts
+    if (
+      typeof ignoreHTTPSErrors !== 'undefined' &&
+      launchParams.acceptInsecureCerts === undefined
+    ) {
+      launchParams.acceptInsecureCerts = ignoreHTTPSErrors !== 'false';
+      launchParams.ignoreHTTPSErrors = undefined;
+    }
+
+    if (
+      typeof ignoreDefaultArgs !== 'undefined' &&
+      launchParams.ignoreDefaultArgs === undefined
+    ) {
+      const parsed =
+        typeof ignoreDefaultArgs === 'string' && ignoreDefaultArgs.includes(',')
+          ? ignoreDefaultArgs.split(',')
+          : ignoreDefaultArgs;
+      launchParams.ignoreDefaultArgs = Array.isArray(parsed)
+        ? parsed
+        : parsed !== 'false';
+    }
+
+    // Handle CLI switches
+    if (cliSwitches.length) {
+      launchParams.args = cliSwitches.map(([n, v]) => `${n}=${v}`);
+    }
+
+    shimParam.forEach((n) => searchParams.delete(n));
+    cliSwitches.forEach(([n]) => searchParams.delete(n));
+    searchParams.set('launch', JSON.stringify(launchParams));
+  }
+
+  return url;
+}
