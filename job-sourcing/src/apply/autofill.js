@@ -90,8 +90,16 @@ export function resolveFieldValue(fieldName, profile, job, answers) {
   return matchProfileValue(fieldName, profile, job);
 }
 
+const AUTOFILL_ID_ATTR = 'data-job-sourcing-field-id';
+
+/**
+ * Tags every input/textarea/select with a stable, unique attribute and
+ * returns a description of each. The attribute (not positional index into
+ * a re-queried NodeList) is what fill-time code uses to find the element
+ * again — see the comment on AUTOFILL_ID_ATTR lookups below for why.
+ */
 async function describeFields(page) {
-  return page.evaluate(() => {
+  return page.evaluate((idAttr) => {
     function labelFor(el) {
       if (el.labels && el.labels.length) return el.labels[0].textContent.trim();
       const aria = el.getAttribute('aria-label');
@@ -102,6 +110,7 @@ async function describeFields(page) {
     }
     const els = Array.from(document.querySelectorAll('input, textarea, select'));
     return els.map((el, index) => {
+      el.setAttribute(idAttr, String(index));
       const tag = el.tagName.toLowerCase();
       const field = {
         index,
@@ -117,7 +126,29 @@ async function describeFields(page) {
       }
       return field;
     });
-  });
+  }, AUTOFILL_ID_ATTR);
+}
+
+/**
+ * Finds the element for `field` by the stable attribute describeFields()
+ * tagged it with, NOT by re-querying and indexing into
+ * `document.querySelectorAll('input, textarea, select')` fresh.
+ *
+ * That re-query approach is what this replaces, and it was actively wrong:
+ * typing into one field or selecting a <select> option fires input/change
+ * events, and on these React-driven ATS forms that routinely mounts or
+ * unmounts other elements (conditional fields, inline validation nodes,
+ * live-search widgets). Every element after the mutation point shifts by
+ * one or more positions in document order, so a later field's captured
+ * index silently pointed at a different element than the one we described
+ * — symptoms seen in practice: an answer meant for field N landing in
+ * field N+1, and some fields (custom country/phone widgets in particular)
+ * ending up targeting a hidden or unrelated node and never visibly filling.
+ * Tagging the actual element up front and looking it up by that tag is
+ * immune to how many siblings come and go around it.
+ */
+function findFieldHandle(page, field) {
+  return page.$(`[${AUTOFILL_ID_ATTR}="${field.index}"]`);
 }
 
 /** Best-effort dismissal of cookie-consent/GDPR overlays that otherwise block form fields. */
@@ -144,8 +175,9 @@ async function dismissCommonBanners(page) {
 /** Selects a <select> option by matching `want` against option text (preferred), then value. */
 async function selectOption(page, index, want) {
   return page.evaluate(
-    (i, wantValue) => {
-      const el = document.querySelectorAll('input, textarea, select')[i];
+    (i, wantValue, idAttr) => {
+      const el = document.querySelector(`[${idAttr}="${i}"]`);
+      if (!el) return false;
       const options = Array.from(el.options);
       const wanted = String(wantValue).trim().toLowerCase();
       const match =
@@ -160,6 +192,7 @@ async function selectOption(page, index, want) {
     },
     index,
     want,
+    AUTOFILL_ID_ATTR,
   );
 }
 
@@ -219,13 +252,21 @@ export async function autofillApplication(
     for (const field of fields) {
       if (field.type === 'file') {
         if (/resume|cv/i.test(field.name) && profile.resumePath) {
-          const input = (await page.$$('input, textarea, select'))[field.index];
+          const input = await findFieldHandle(page, field);
+          if (!input) {
+            skipped.push(field);
+            continue;
+          }
           await input.uploadFile(resolve(profile.resumePath));
           filled.push({ ...field, value: profile.resumePath });
           continue;
         }
         if (/cover/i.test(field.name) && profile.coverLetterPath) {
-          const input = (await page.$$('input, textarea, select'))[field.index];
+          const input = await findFieldHandle(page, field);
+          if (!input) {
+            skipped.push(field);
+            continue;
+          }
           await input.uploadFile(resolve(profile.coverLetterPath));
           filled.push({ ...field, value: profile.coverLetterPath });
           continue;
@@ -247,7 +288,11 @@ export async function autofillApplication(
           continue;
         }
       } else {
-        const handle = (await page.$$('input, textarea, select'))[field.index];
+        const handle = await findFieldHandle(page, field);
+        if (!handle) {
+          skipped.push(field);
+          continue;
+        }
         await handle.click({ clickCount: 3 }).catch(() => {});
         await handle.type(String(value), { delay: 15 });
       }
