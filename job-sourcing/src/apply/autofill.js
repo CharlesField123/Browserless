@@ -172,7 +172,30 @@ async function dismissCommonBanners(page) {
     .catch(() => {});
 }
 
-/** Selects a <select> option by matching `want` against option text (preferred), then value. */
+/**
+ * Selects a <select> option by matching `want` against option text
+ * (preferred), then value.
+ *
+ * Greenhouse's newer application forms render these as React-controlled
+ * selects. React overrides the native `value` property setter on the
+ * element instance so it can track whether a change came through its own
+ * controlled-input path. A plain `el.value = ...` bypasses that tracked
+ * setter entirely: the assignment "sticks" on the raw DOM node for a
+ * moment, but React's own state never learns about it, so the *next*
+ * re-render (routinely triggered by filling any other field further down
+ * the same form) snaps the element back to whatever React still believes
+ * the value is — typically empty. That matched the observed symptom
+ * exactly: the field is reported filled, but the page keeps showing the
+ * unselected placeholder.
+ *
+ * The fix is the standard workaround for scripting React-controlled
+ * inputs: call the *native* value setter (grabbed from the prototype,
+ * before React's per-instance override shadows it) so the assignment goes
+ * through the same path React itself uses, then dispatch input/change so
+ * React's synthetic event system picks it up and updates its own state to
+ * match — at which point later re-renders preserve it instead of
+ * reverting it.
+ */
 async function selectOption(page, index, want) {
   return page.evaluate(
     (i, wantValue, idAttr) => {
@@ -185,7 +208,12 @@ async function selectOption(page, index, want) {
         options.find((o) => o.value.toLowerCase() === wanted) ||
         options.find((o) => o.textContent.trim().toLowerCase().includes(wanted));
       if (!match) return false;
-      el.value = match.value;
+      const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')?.set;
+      if (nativeSetter) {
+        nativeSetter.call(el, match.value);
+      } else {
+        el.value = match.value;
+      }
       el.dispatchEvent(new Event('input', { bubbles: true }));
       el.dispatchEvent(new Event('change', { bubbles: true }));
       return true;
