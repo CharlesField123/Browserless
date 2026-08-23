@@ -1,10 +1,21 @@
 # Deploying to Railway
 
 This fork includes [`railway.json`](./railway.json), which tells Railway to
-build [`docker/chromium/Dockerfile`](./docker/chromium/Dockerfile) — the
-same image referenced in the main README (`ghcr.io/browserless/chromium`) —
-rather than trying to auto-detect a build (Nixpacks won't know how to run
-the Chromium install/asset-build steps this project needs).
+build [`docker/railway/Dockerfile`](./docker/railway/Dockerfile) rather
+than trying to auto-detect a build (Nixpacks won't know how to run the
+Chromium install/asset-build steps this project needs).
+
+That Dockerfile is a self-contained variant of the upstream
+`docker/chromium/Dockerfile` (the one referenced in the main README as
+`ghcr.io/browserless/chromium`): the upstream one builds on top of
+browserless.io's own *prebuilt* base image, whose dependencies were
+installed from their unmodified `package.json` — so it's missing the MCP
+SDK this fork's `/mcp` endpoint needs (see [MCP.md](./MCP.md)).
+`docker/railway/Dockerfile` installs from this repo's own
+`package.json`/`package-lock.json` instead, and also copies `job-sourcing/`
+into the image so `/mcp`'s tools can find it. If you don't need `/mcp` —
+just the plain Browserless server — `docker/chromium/Dockerfile` is lighter
+and works fine too.
 
 ## Option A: Railway dashboard (no CLI needed)
 
@@ -70,3 +81,9 @@ BROWSERLESS_TOKEN=<the TOKEN you set above>
 
 Then `job-sourcing search` / `apply` / `list` work exactly as in
 `JOB_SOURCING.md`, just against the Railway instance instead of a local one.
+
+## Talking to it from Claude instead of the CLI
+
+If you'd rather drive job search/apply conversationally than from a
+terminal, this same deployment also exposes an MCP endpoint at `/mcp` you
+can add as a claude.ai custom connector — see [MCP.md](./MCP.md).

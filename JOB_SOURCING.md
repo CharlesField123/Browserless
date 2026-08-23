@@ -50,7 +50,9 @@ engine with a dry-run safety net. `job-sourcing/` is that reusable layer.
   unless you explicitly set `DRY_RUN=false`.
 
 Deploying the server itself to Railway instead of running it locally? See
-[RAILWAY.md](./RAILWAY.md).
+[RAILWAY.md](./RAILWAY.md). Want to drive this from Claude conversationally
+instead of the CLI below? See [MCP.md](./MCP.md) — this fork exposes
+search/apply as MCP tools at `/mcp`, usable as a claude.ai custom connector.
 
 ## Quick start
 

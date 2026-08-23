@@ -153,6 +153,7 @@ export enum HTTPManagementRoutes {
   active = '/active?(/)',
   config = '/config?(/)',
   kill = '/kill/+([0-9a-zA-Z-_])?(/)',
+  mcp = '/mcp?(/)',
   meta = '/meta?(/)',
   metrics = '/metrics?(/)',
   metricsTotal = '/metrics/total?(/)',

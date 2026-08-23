@@ -25,3 +25,12 @@ build
 .env.*
 *.log
 npm-debug.log*
+
+# job-sourcing/ is copied whole into docker/railway/Dockerfile's runtime
+# stage, but never its local node_modules, personal data, or candidate
+# profile/board config (those are meant to live on a mounted volume, see
+# RAILWAY.md and MCP.md, not be baked into an image layer).
+job-sourcing/node_modules
+job-sourcing/data
+job-sourcing/config/candidate.json
+job-sourcing/config/boards.json
